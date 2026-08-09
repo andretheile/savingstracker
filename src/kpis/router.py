@@ -1,0 +1,97 @@
+"""FastAPI router for KPI management and evaluation."""
+
+from datetime import date
+from decimal import Decimal
+from typing import List, Optional
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.dependencies import get_db
+from src.kpis.engine import kpi_engine
+from src.kpis.models import KPIDefinition, KPISnapshot
+from src.kpis.service import evaluate_and_save_kpis_for_user
+
+router = APIRouter(prefix="/kpis", tags=["kpis"])
+
+
+class KPICreate(BaseModel):
+    user_id: uuid.UUID
+    name: str
+    description: str = ""
+    formula: str
+    unit: str = "%"
+    period: str = "monthly"
+
+
+class KPIValidateRequest(BaseModel):
+    formula: str
+
+
+class KPIValidateResponse(BaseModel):
+    is_valid: bool
+    variables: List[str]
+    errors: List[str]
+
+
+class KPISnapshotResponse(BaseModel):
+    kpi_id: uuid.UUID
+    period_start: date
+    period_end: date
+    value: Decimal
+
+    class Config:
+        from_attributes = True
+
+
+@router.post("/validate", response_model=KPIValidateResponse)
+async def validate_formula(data: KPIValidateRequest):
+    """Validate a custom KPI formula string without saving."""
+    is_valid, errors = kpi_engine.validate_formula(data.formula)
+    variables = kpi_engine.extract_variables(data.formula)
+    return KPIValidateResponse(
+        is_valid=is_valid,
+        variables=variables,
+        errors=errors,
+    )
+
+
+@router.post("/", status_code=status.HTTP_201_CREATED)
+async def create_custom_kpi(
+    data: KPICreate,
+    db: AsyncSession = Depends(get_db),
+):
+    is_valid, errors = kpi_engine.validate_formula(data.formula)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid KPI formula: {', '.join(errors)}",
+        )
+
+    variables = kpi_engine.extract_variables(data.formula)
+    kpi = KPIDefinition(
+        user_id=data.user_id,
+        name=data.name,
+        description=data.description,
+        formula=data.formula,
+        unit=data.unit,
+        period=data.period,
+        required_variables={"vars": variables},
+    )
+    db.add(kpi)
+    await db.flush()
+    return {"id": kpi.id, "name": kpi.name, "formula": kpi.formula}
+
+
+@router.post("/evaluate/{user_id}", response_model=List[KPISnapshotResponse])
+async def evaluate_kpis(
+    user_id: uuid.UUID,
+    period_start: date,
+    period_end: date,
+    db: AsyncSession = Depends(get_db),
+):
+    snapshots = await evaluate_and_save_kpis_for_user(db, user_id, period_start, period_end)
+    return snapshots

@@ -167,4 +167,4 @@ pytest tests/ -v
 ---
 
 ## 📄 License
-MIT License. Built for privacy, self-hosting, and financial independence.
+Licensed under the [Apache License, Version 2.0](./LICENSE). Built for privacy, self-hosting, and financial independence.

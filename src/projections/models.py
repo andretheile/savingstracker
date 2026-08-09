@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,17 +28,17 @@ class ProjectionConfig(UUIDMixin, TimestampMixin, Base):
     )
     annual_return_pct: Mapped[float] = mapped_column(
         Numeric(precision=5, scale=2), nullable=False, default=7.0
-    )  # MSCI World default
+    )
     inflation_pct: Mapped[float] = mapped_column(
         Numeric(precision=5, scale=2), nullable=False, default=2.0
     )
     horizon_years: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
     monthly_contribution: Mapped[float | None] = mapped_column(
         Numeric(precision=12, scale=2), nullable=True
-    )  # Override — if None, use actual savings from KPI
+    )
     use_actual_savings: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False
-    )  # Derive monthly contribution from savings rate KPI
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # Relationships
@@ -77,10 +77,10 @@ class ProjectionSnapshot(UUIDMixin, Base):
     )
     projected_value_real: Mapped[float] = mapped_column(
         Numeric(precision=14, scale=2), nullable=False
-    )  # Inflation-adjusted
+    )
     scenarios: Mapped[dict | None] = mapped_column(
-        JSONB, nullable=True
-    )  # What-if analysis results
+        JSON().with_variant(JSONB, "postgresql"), nullable=True
+    )
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

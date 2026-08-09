@@ -1,0 +1,66 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Run Unit & Service Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: savingstracker
+          POSTGRES_PASSWORD: changeme
+          POSTGRES_DB: savingstracker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+          pip install pytest-cov aiosqlite greenlet
+
+      - name: Run Ruff Linter
+        run: |
+          ruff check src/ tests/
+
+      - name: Execute Pytest with Coverage
+        env:
+          DATABASE_URL: postgresql+asyncpg://savingstracker:changeme@localhost:5432/savingstracker
+          REDIS_URL: redis://localhost:6379/0
+          ENCRYPTION_KEY: u6Z...=
+        run: |
+          pytest --cov=src --cov-report=xml --cov-report=term-missing tests/
+
+      - name: Upload Coverage to Summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml

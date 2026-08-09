@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, JSON
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -24,7 +24,9 @@ class MonthlyReport(UUIDMixin, Base):
         index=True,
     )
     report_month: Mapped[date] = mapped_column(Date, nullable=False)
-    report_data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    report_data: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=False
+    )
     sent_via_telegram: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

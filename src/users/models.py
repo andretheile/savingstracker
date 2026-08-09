@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Boolean, String
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import BigInteger, Boolean, JSON, String
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.base_model import Base, TimestampMixin, UUIDMixin
@@ -21,7 +21,9 @@ class User(UUIDMixin, TimestampMixin, Base):
     timezone: Mapped[str] = mapped_column(
         String(64), nullable=False, default="Europe/Berlin"
     )
-    preferences: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+    preferences: Mapped[dict | None] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=True, default=None
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # Relationships

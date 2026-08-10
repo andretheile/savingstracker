@@ -32,18 +32,19 @@ async def kpis_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             session, user.id, first_day, last_day
         )
 
+        kpi_lines = []
+        for snap in snapshots:
+            val = snap.value
+            kpi_def = getattr(snap, "kpi_definition", None)
+            unit = kpi_def.unit if kpi_def else ""
+            name = kpi_def.name if kpi_def else "Metric"
+            kpi_lines.append(f"• *{name}:* `{val:.1f}{unit}`")
+
     month_str = today.strftime("%B %Y")
     lines = [
         f"📊 *KPI Dashboard — {month_str}*",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-    ]
-
-    for snap in snapshots:
-        val = snap.value
-        unit = snap.kpi_definition.unit if hasattr(snap, "kpi_definition") and snap.kpi_definition else ""
-        name = snap.kpi_definition.name if hasattr(snap, "kpi_definition") and snap.kpi_definition else "Metric"
-        lines.append(f"• *{name}:* `{val:.1f}{unit}`")
-
+    ] + kpi_lines
     lines.append("\n💡 Type /newkpi to add a custom metric formula!")
 
     await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")

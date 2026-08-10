@@ -6,8 +6,10 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.accounts.models import Account
 from src.accounts.service import create_account, get_account_balance, list_user_accounts
 from src.core.dependencies import get_db
 
@@ -53,6 +55,30 @@ async def api_create_account(
         initial_balance=data.initial_balance,
     )
     return acc
+
+
+@router.get("/{account_id}", response_model=AccountBalanceResponse)
+async def api_get_account(
+    account_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(Account).where(Account.id == account_id, Account.is_active.is_(True))
+    result = await db.execute(stmt)
+    acc = result.scalar_one_or_none()
+    if not acc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+
+    bal = await get_account_balance(db, acc.id)
+    return AccountBalanceResponse(
+        id=acc.id,
+        user_id=acc.user_id,
+        name=acc.name,
+        iban=acc.iban,
+        currency=acc.currency,
+        initial_balance=float(acc.initial_balance),
+        is_active=acc.is_active,
+        current_balance=bal,
+    )
 
 
 @router.get("/user/{user_id}", response_model=List[AccountBalanceResponse])

@@ -157,6 +157,7 @@ async def evaluate_and_save_kpis_for_user(
             variable_values=res.variable_values,
             computed_at=now,
         )
+        snapshot.kpi_definition = kpi
         session.add(snapshot)
         snapshots.append(snapshot)
 

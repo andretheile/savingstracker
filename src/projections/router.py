@@ -10,7 +10,8 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.dependencies import get_db
-from src.projections.service import generate_user_projection
+from src.projections.service import generate_user_projection, get_or_create_user_projection_config
+
 
 router = APIRouter(prefix="/projections", tags=["projections"])
 
@@ -34,6 +35,26 @@ class ProjectionResponse(BaseModel):
     total_contributed: Decimal
     total_growth: Decimal
     scenarios: List[ScenarioResponse]
+
+
+class ProjectionConfigUpdate(BaseModel):
+    annual_return_pct: Optional[float] = None
+    inflation_pct: Optional[float] = None
+    horizon_years: Optional[int] = None
+    monthly_contribution: Optional[float] = None
+    use_actual_savings: Optional[bool] = None
+
+
+class ProjectionConfigResponse(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    annual_return_pct: float
+    inflation_pct: float
+    horizon_years: int
+    use_actual_savings: bool
+
+    class Config:
+        from_attributes = True
 
 
 @router.post("/compute/{user_id}", response_model=ProjectionResponse)
@@ -68,3 +89,25 @@ async def compute_projection(
         total_growth=proj_data.baseline.total_growth,
         scenarios=scenarios,
     )
+
+
+@router.put("/config/{user_id}", response_model=ProjectionConfigResponse)
+async def update_projection_config(
+    user_id: uuid.UUID,
+    data: ProjectionConfigUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    config = await get_or_create_user_projection_config(db, user_id)
+    if data.annual_return_pct is not None:
+        config.annual_return_pct = data.annual_return_pct
+    if data.inflation_pct is not None:
+        config.inflation_pct = data.inflation_pct
+    if data.horizon_years is not None:
+        config.horizon_years = data.horizon_years
+    if data.monthly_contribution is not None:
+        config.monthly_contribution = data.monthly_contribution
+    if data.use_actual_savings is not None:
+        config.use_actual_savings = data.use_actual_savings
+
+    await db.flush()
+    return config

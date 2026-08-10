@@ -17,9 +17,10 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     async with get_standalone_session() as session:
         user = await get_or_create_user_by_telegram_id(session, tg_user.id, name)
+        user_name = user.name
 
     msg = (
-        f"👋 Welcome to *SavingsTracker*, {user.name}!\n\n"
+        f"👋 Welcome to *SavingsTracker*, {user_name}!\n\n"
         "I'm your agentic financial assistant. I help you monitor accounts, "
         "classify spending, track custom KPIs, and project long-term savings growth.\n\n"
         "📌 *Quick Commands:*\n"

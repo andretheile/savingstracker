@@ -86,3 +86,29 @@ def generate_user_monthly_report(self, user_id_str: str):
 def check_stale_connections():
     """Daily check for bank connections that haven't synced in 30 days."""
     logger.info("Running daily stale connection check...")
+
+    async def _run():
+        from datetime import timedelta
+        from sqlalchemy import select, or_
+        from src.banking.models import BankConnection
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        async with get_standalone_session() as session:
+            stmt = select(BankConnection).where(
+                BankConnection.is_active.is_(True),
+                or_(
+                    BankConnection.last_synced_at < cutoff,
+                    BankConnection.last_synced_at.is_(None),
+                ),
+            )
+            result = await session.execute(stmt)
+            stale_conns = result.scalars().all()
+
+            logger.info("Found %d stale bank connections (>30 days since sync)", len(stale_conns))
+            for conn in stale_conns:
+                conn.sync_status = "stale"
+                conn.last_error = "Connection idle over 30 days — re-authentication required."
+
+            await session.flush()
+
+    asyncio.run(_run())

@@ -1,6 +1,5 @@
 """FastAPI main entrypoint with lifecycle management for DB, Redis, Telegram Bot, and Web Dashboard."""
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path

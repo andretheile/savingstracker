@@ -65,13 +65,13 @@ export const KpiStudio: React.FC<KpiStudioProps> = ({ kpis, onAddKpi }) => {
   };
 
   return (
-    <div className="glass-panel p-6 rounded-3xl mb-8">
+    <div className="cream-panel p-6 mb-8">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
-          <Code2 className="w-5 h-5 text-indigo-400" />
-          <h2 className="text-xl font-bold text-white font-heading">Custom KPI Formula Studio</h2>
+          <Code2 className="w-5 h-5 text-[#A38038]" />
+          <h2 className="text-xl font-bold text-[#1A150E] font-heading">Custom KPI Formula Studio</h2>
         </div>
-        <span className="text-xs text-slate-400 bg-slate-800/80 px-3 py-1 rounded-lg border border-slate-700">
+        <span className="text-xs text-[#7A602B] bg-[#F7F3EB] px-3 py-1 border border-[#E5DEC9] font-semibold">
           Powered by asteval AST parser
         </span>
       </div>
@@ -80,63 +80,63 @@ export const KpiStudio: React.FC<KpiStudioProps> = ({ kpis, onAddKpi }) => {
         
         {/* Existing KPIs List */}
         <div className="lg:col-span-6 space-y-3">
-          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Active Metrics & Built-in KPIs</h3>
+          <h3 className="text-xs font-bold text-[#7A602B] uppercase tracking-widest mb-2">Active Metrics & Built-in KPIs</h3>
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {kpis.map((kpi) => (
-              <div key={kpi.id} className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 hover:border-slate-700 transition">
+              <div key={kpi.id} className="bg-[#FFFFFF] p-4 border border-[#E5DEC9] hover:border-[#C5A059] transition">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-bold text-slate-200">{kpi.name}</span>
-                  <span className="text-xs font-mono font-bold text-cyan-400">{kpi.value.toFixed(1)}{kpi.unit}</span>
+                  <span className="text-xs font-bold text-[#1A150E]">{kpi.name}</span>
+                  <span className="text-xs font-mono font-bold text-[#A38038]">{kpi.value.toFixed(1)}{kpi.unit}</span>
                 </div>
-                <code className="text-[10px] font-mono text-slate-400 block truncate bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800 mb-1">
+                <code className="text-[10px] font-mono text-[#7A602B] block truncate bg-[#F7F3EB] px-2 py-1 border border-[#E5DEC9] mb-1">
                   {kpi.formula}
                 </code>
-                {kpi.description && <p className="text-[10px] text-slate-400">{kpi.description}</p>}
+                {kpi.description && <p className="text-[10px] text-[#6E604D]">{kpi.description}</p>}
               </div>
             ))}
           </div>
         </div>
 
         {/* Formula Builder Form */}
-        <div className="lg:col-span-6 bg-slate-900/50 p-5 rounded-2xl border border-slate-800/80">
-          <h3 className="text-xs font-semibold text-cyan-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
-            <Plus className="w-4 h-4" /> Define New KPI Formula
+        <div className="lg:col-span-6 bg-[#F9F7F2] p-5 border border-[#E5DEC9]">
+          <h3 className="text-xs font-bold text-[#7A602B] uppercase tracking-widest mb-4 flex items-center gap-1.5">
+            <Plus className="w-4 h-4 text-[#A38038]" /> Define New KPI Formula
           </h3>
 
           <div className="space-y-4">
             <div>
-              <label className="text-xs text-slate-300 block mb-1">KPI Name</label>
+              <label className="text-xs text-[#594E3F] font-semibold block mb-1">KPI Name</label>
               <input
                 type="text"
                 placeholder="e.g. Leisure Budget Ratio"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="glass-input text-xs px-3 py-2 rounded-xl w-full"
+                className="cream-input text-xs px-3 py-2 w-full"
               />
             </div>
 
             <div>
-              <label className="text-xs text-slate-300 block mb-1">Formula Expression</label>
+              <label className="text-xs text-[#594E3F] font-semibold block mb-1">Formula Expression</label>
               <input
                 type="text"
                 placeholder="pct(category_dining_out_total + category_entertainment_total, total_expense)"
                 value={formula}
                 onChange={(e) => setFormula(e.target.value)}
-                className="glass-input text-xs font-mono px-3 py-2 rounded-xl w-full text-cyan-300"
+                className="cream-input text-xs font-mono px-3 py-2 w-full text-[#7A602B]"
               />
-              <span className="text-[10px] text-slate-400 block mt-1">
-                Variables: <code className="text-cyan-400">total_income</code>, <code className="text-cyan-400">total_expense</code>, <code className="text-cyan-400">net_cashflow</code>, <code className="text-cyan-400">category_&lt;name&gt;_total</code>
+              <span className="text-[10px] text-[#6E604D] block mt-1">
+                Variables: <code className="text-[#A38038] font-bold">total_income</code>, <code className="text-[#A38038] font-bold">total_expense</code>, <code className="text-[#A38038] font-bold">net_cashflow</code>, <code className="text-[#A38038] font-bold">category_&lt;name&gt;_total</code>
               </span>
             </div>
 
             <div className="flex items-center gap-3">
               <div className="w-1/3">
-                <label className="text-xs text-slate-300 block mb-1">Unit</label>
+                <label className="text-xs text-[#594E3F] font-semibold block mb-1">Unit</label>
                 <select
                   value={unit}
                   onChange={(e) => setUnit(e.target.value)}
-                  className="glass-input text-xs px-3 py-2 rounded-xl w-full"
+                  className="cream-input text-xs px-3 py-2 w-full"
                 >
                   <option value="%">% (Percentage)</option>
                   <option value="€">€ (Euro)</option>
@@ -148,7 +148,7 @@ export const KpiStudio: React.FC<KpiStudioProps> = ({ kpis, onAddKpi }) => {
                 <button
                   type="button"
                   onClick={handleTestFormula}
-                  className="glass-button text-xs font-semibold px-4 py-2 rounded-xl text-slate-200 flex-1 hover:border-slate-600"
+                  className="cream-button text-xs font-semibold px-4 py-2 flex-1"
                 >
                   Test Formula
                 </button>
@@ -156,7 +156,7 @@ export const KpiStudio: React.FC<KpiStudioProps> = ({ kpis, onAddKpi }) => {
                   type="button"
                   onClick={handleSaveKpi}
                   disabled={!name || !formula}
-                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs px-4 py-2 rounded-xl flex-1 disabled:opacity-50"
+                  className="gold-button-primary text-xs px-4 py-2 flex-1 disabled:opacity-50"
                 >
                   Save KPI
                 </button>
@@ -165,16 +165,16 @@ export const KpiStudio: React.FC<KpiStudioProps> = ({ kpis, onAddKpi }) => {
 
             {/* Test Result Feedback */}
             {testResult && (
-              <div className={`p-3 rounded-xl border text-xs ${testResult.isValid ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-rose-500/10 border-rose-500/30 text-rose-300'}`}>
-                <div className="flex items-center gap-2 font-semibold mb-1">
-                  {testResult.isValid ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <AlertCircle className="w-4 h-4 text-rose-400" />}
+              <div className={`p-3 border text-xs ${testResult.isValid ? 'bg-[#F7F3EB] border-[#E5DEC9] text-[#7A602B]' : 'bg-[#FAF0EE] border-[#E8C8C4] text-[#8C3A2B]'}`}>
+                <div className="flex items-center gap-2 font-bold mb-1">
+                  {testResult.isValid ? <CheckCircle2 className="w-4 h-4 text-[#A38038]" /> : <AlertCircle className="w-4 h-4 text-[#8C3A2B]" />}
                   <span>{testResult.isValid ? 'Formula Validated' : 'Validation Failed'}</span>
                 </div>
 
                 {testResult.isValid && (
                   <div>
-                    <p>Evaluated Value: <strong className="text-white">{testResult.value?.toFixed(1)}{unit}</strong></p>
-                    <p className="text-[10px] opacity-80">Variables Extracted: {testResult.variables?.join(', ')}</p>
+                    <p>Evaluated Value: <strong className="text-[#1A150E]">{testResult.value?.toFixed(1)}{unit}</strong></p>
+                    <p className="text-[10px] text-[#6E604D]">Variables Extracted: {testResult.variables?.join(', ')}</p>
                   </div>
                 )}
 

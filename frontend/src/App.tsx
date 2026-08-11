@@ -51,11 +51,10 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#080c14] text-slate-100 flex flex-col font-sans relative">
+    <div className="min-h-screen bg-[#F9F7F2] text-[#1A150E] flex flex-col font-sans relative">
       
       {/* Background ambient lighting */}
-      <div className="ambient-glow-cyan top-0 left-1/4" />
-      <div className="ambient-glow-purple top-1/3 right-10" />
+      <div className="ambient-glow-gold top-0 left-1/4" />
 
       {/* Header */}
       <Header
@@ -69,13 +68,13 @@ export function App() {
 
       {/* Navigation Tabs */}
       <nav className="max-w-7xl mx-auto w-full px-6 pt-6">
-        <div className="flex items-center gap-2 p-1.5 rounded-2xl glass-panel w-fit border border-slate-800/80">
+        <div className="flex flex-wrap items-center gap-1.5 p-1.5 cream-panel w-fit border border-[#E5DEC9]">
           <button
             onClick={() => setActiveTab('overview')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold transition ${
+            className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider transition ${
               activeTab === 'overview'
-                ? 'bg-gradient-to-r from-cyan-500 to-teal-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-[#1A150E] text-[#F4E5C2] border border-[#C5A059]'
+                : 'bg-[#F7F3EB] text-[#594E3F] hover:bg-[#EFEADF] hover:text-[#1A150E] border border-[#E5DEC9]'
             }`}
           >
             Overview & Balance
@@ -83,21 +82,21 @@ export function App() {
 
           <button
             onClick={() => setActiveTab('simulator')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold transition ${
+            className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider transition ${
               activeTab === 'simulator'
-                ? 'bg-gradient-to-r from-cyan-500 to-teal-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-[#1A150E] text-[#F4E5C2] border border-[#C5A059]'
+                : 'bg-[#F7F3EB] text-[#594E3F] hover:bg-[#EFEADF] hover:text-[#1A150E] border border-[#E5DEC9]'
             }`}
           >
-            🔮 Savings Growth Simulator
+            ⚜️ Savings Growth Simulator
           </button>
 
           <button
             onClick={() => setActiveTab('kpis')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold transition ${
+            className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider transition ${
               activeTab === 'kpis'
-                ? 'bg-gradient-to-r from-cyan-500 to-teal-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-[#1A150E] text-[#F4E5C2] border border-[#C5A059]'
+                : 'bg-[#F7F3EB] text-[#594E3F] hover:bg-[#EFEADF] hover:text-[#1A150E] border border-[#E5DEC9]'
             }`}
           >
             📊 Custom KPI Studio
@@ -105,10 +104,10 @@ export function App() {
 
           <button
             onClick={() => setActiveTab('banking')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold transition ${
+            className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider transition ${
               activeTab === 'banking'
-                ? 'bg-gradient-to-r from-cyan-500 to-teal-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-[#1A150E] text-[#F4E5C2] border border-[#C5A059]'
+                : 'bg-[#F7F3EB] text-[#594E3F] hover:bg-[#EFEADF] hover:text-[#1A150E] border border-[#E5DEC9]'
             }`}
           >
             🏦 FinTS Bank Hub
@@ -116,10 +115,10 @@ export function App() {
 
           <button
             onClick={() => setActiveTab('transactions')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold transition ${
+            className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider transition ${
               activeTab === 'transactions'
-                ? 'bg-gradient-to-r from-cyan-500 to-teal-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-[#1A150E] text-[#F4E5C2] border border-[#C5A059]'
+                : 'bg-[#F7F3EB] text-[#594E3F] hover:bg-[#EFEADF] hover:text-[#1A150E] border border-[#E5DEC9]'
             }`}
           >
             💸 Transactions Feed
@@ -166,8 +165,8 @@ export function App() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-800/80 py-6 text-center text-xs text-slate-500">
-        <p>SavingsTracker v1.0 — Modular Financial Intelligence & Custom KPI Engine</p>
+      <footer className="border-t border-[#E5DEC9] py-6 text-center text-xs text-[#7A6E5D] bg-[#F9F7F2]">
+        <p className="font-semibold uppercase tracking-widest text-[10px] text-[#A38038]">SavingsTracker v1.0 — Minimalist Financial Intelligence & Custom KPI Engine</p>
       </footer>
     </div>
   );

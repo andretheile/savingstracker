@@ -1,4 +1,4 @@
-"""Redis cache helpers for KPI caching and rate limiting."""
+"""Redis cache helpers for KPI caching and rate limiting with graceful fallback."""
 
 from __future__ import annotations
 
@@ -29,49 +29,66 @@ async def get_redis() -> aioredis.Redis:
 
 async def cache_get(key: str) -> Any | None:
     """Retrieve a cached JSON value by key."""
-    r = await get_redis()
-    raw = await r.get(key)
-    if raw is None:
-        return None
     try:
-        return json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return raw
+        r = await get_redis()
+        raw = await r.get(key)
+        if raw is None:
+            return None
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return raw
+    except Exception as e:
+        logger.debug("Redis cache_get bypassed: %s", e)
+        return None
 
 
 async def cache_set(key: str, value: Any, ttl_seconds: int = 3600) -> None:
     """Store a JSON-serializable value with a TTL."""
-    r = await get_redis()
-    await r.set(key, json.dumps(value, default=str), ex=ttl_seconds)
+    try:
+        r = await get_redis()
+        await r.set(key, json.dumps(value, default=str), ex=ttl_seconds)
+    except Exception as e:
+        logger.debug("Redis cache_set bypassed: %s", e)
 
 
 async def cache_invalidate(pattern: str) -> int:
     """Delete all keys matching a glob pattern. Returns count deleted."""
-    r = await get_redis()
-    keys = []
-    async for key in r.scan_iter(match=pattern):
-        keys.append(key)
-    if keys:
-        return await r.delete(*keys)
+    try:
+        r = await get_redis()
+        keys = []
+        async for key in r.scan_iter(match=pattern):
+            keys.append(key)
+        if keys:
+            return await r.delete(*keys)
+    except Exception as e:
+        logger.debug("Redis cache_invalidate bypassed: %s", e)
     return 0
 
 
 async def rate_limit_check(key: str, max_calls: int, window_seconds: int) -> bool:
     """Simple sliding-window rate limiter. Returns True if allowed."""
-    r = await get_redis()
-    current = await r.get(key)
-    if current is not None and int(current) >= max_calls:
-        return False
-    pipe = r.pipeline()
-    pipe.incr(key)
-    pipe.expire(key, window_seconds)
-    await pipe.execute()
-    return True
+    try:
+        r = await get_redis()
+        current = await r.get(key)
+        if current is not None and int(current) >= max_calls:
+            return False
+        pipe = r.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, window_seconds)
+        await pipe.execute()
+        return True
+    except Exception as e:
+        logger.debug("Redis rate_limit_check bypassed: %s", e)
+        return True
 
 
 async def close_redis() -> None:
     """Close the Redis connection pool on shutdown."""
     global _pool  # noqa: PLW0603
     if _pool is not None:
-        await _pool.aclose()
+        try:
+            await _pool.aclose()
+        except Exception:
+            pass
         _pool = None

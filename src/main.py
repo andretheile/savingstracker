@@ -8,12 +8,22 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+import src.users.models  # noqa
+import src.accounts.models  # noqa
+import src.banking.models  # noqa
+import src.transactions.models  # noqa
+import src.classification.models  # noqa
+import src.kpis.models  # noqa
+import src.projections.models  # noqa
+import src.scheduler.models  # noqa
+
 from src.accounts.router import router as accounts_router
 from src.balance_sheets.router import router as balance_sheets_router
 from src.classification.service import seed_default_categories
 from src.config import settings
 from src.core.cache import close_redis
-from src.core.database import dispose_engine, get_standalone_session
+from src.core.database import dispose_engine, get_standalone_session, engine
+from src.core.base_model import Base
 from src.kpis.router import router as kpis_router
 from src.kpis.service import ensure_builtin_kpis_seeded
 from src.projections.router import router as projections_router
@@ -28,9 +38,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application startup and shutdown lifecycle."""
-    logger.info("Initializing SavingsTracker application...")
+    # 1. Ensure DB tables exist
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
-    # 1. Seed database with default categories and KPIs
+    # 2. Seed database with default categories and KPIs
     async with get_standalone_session() as session:
         await seed_default_categories(session)
         await ensure_builtin_kpis_seeded(session)

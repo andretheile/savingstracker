@@ -1,20 +1,21 @@
 """Unit tests for core functionality — security encryption, cache, and database helpers."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from cryptography.fernet import Fernet
 
 from src.config import Settings
-from src.core.security import encrypt_field, decrypt_field, _get_fernet
 from src.core.cache import (
     cache_get,
-    cache_set,
     cache_invalidate,
-    rate_limit_check,
+    cache_set,
     close_redis,
+    rate_limit_check,
 )
-from src.core.database import get_session, get_standalone_session, dispose_engine
+from src.core.database import dispose_engine, get_session, get_standalone_session
 from src.core.dependencies import get_db
+from src.core.security import _get_fernet, decrypt_field, encrypt_field
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +33,28 @@ def test_config_settings():
         encryption_key="testkey",
     )
     assert "postgresql+psycopg2" in s.sync_database_url
+    assert s.openrouter_model
+
+
+def test_persist_env_value(tmp_path, monkeypatch):
+    import src.core.envfile as envfile
+    from src.config import settings
+    from src.core.envfile import persist_env_value
+
+    env = tmp_path / ".env"
+    env.write_text("FOO=1\n")
+    monkeypatch.setattr(envfile, "_ENV_PATH", env)
+    old = settings.openrouter_api_key
+    try:
+        persist_env_value("OPENROUTER_API_KEY", "sk-test-key")
+        text = env.read_text()
+        assert "OPENROUTER_API_KEY=sk-test-key" in text
+        assert settings.openrouter_api_key == "sk-test-key"
+        persist_env_value("OPENROUTER_API_KEY", "sk-replaced")
+        assert env.read_text().count("OPENROUTER_API_KEY=") == 1
+        assert "sk-replaced" in env.read_text()
+    finally:
+        settings.openrouter_api_key = old
 
 
 def test_security_encryption_decryption():

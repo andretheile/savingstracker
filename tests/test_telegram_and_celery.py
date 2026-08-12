@@ -1,35 +1,33 @@
 """Unit tests for Telegram bot handlers and Celery tasks."""
 
-import pytest
-import uuid
 import asyncio
-from datetime import date
+import uuid
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from src.core.base_model import Base
-import src.users.models  # noqa
 import src.accounts.models  # noqa
 import src.banking.models  # noqa
-import src.transactions.models  # noqa
 import src.classification.models  # noqa
 import src.kpis.models  # noqa
 import src.projections.models  # noqa
 import src.scheduler.models  # noqa
-
+import src.transactions.models  # noqa
+import src.users.models  # noqa
 from src.celery_app import celery_app
-from src.users.service import get_or_create_user_by_telegram_id
-from src.telegram_bot.handlers.start import start_handler, help_handler
-from src.telegram_bot.handlers.kpis import kpis_handler, newkpi_handler
-from src.telegram_bot.handlers.projections import projection_handler
-from src.telegram_bot.handlers.balance import balance_handler
+from src.core.base_model import Base
 from src.scheduler.tasks import (
+    check_stale_connections,
     generate_all_monthly_reports,
     generate_user_monthly_report,
-    check_stale_connections,
 )
+from src.telegram_bot.handlers.balance import balance_handler
+from src.telegram_bot.handlers.kpis import kpis_handler, newkpi_handler
+from src.telegram_bot.handlers.projections import projection_handler
+from src.telegram_bot.handlers.start import help_handler, start_handler
+from src.users.service import get_or_create_user_by_telegram_id
 
 
 @pytest.fixture
@@ -46,7 +44,7 @@ async def async_session():
 @pytest.mark.asyncio
 async def test_telegram_all_handlers(async_session: AsyncSession):
     # Seed user inside session
-    user = await get_or_create_user_by_telegram_id(async_session, 999111, "Bot User")
+    await get_or_create_user_by_telegram_id(async_session, 999111, "Bot User")
 
     update = MagicMock()
     update.effective_user = MagicMock()
@@ -68,6 +66,7 @@ async def test_telegram_all_handlers(async_session: AsyncSession):
         yield async_session
 
     with patch("src.telegram_bot.handlers.start.get_standalone_session", side_effect=mock_standalone), \
+         patch("src.telegram_bot.handlers.common.get_standalone_session", side_effect=mock_standalone), \
          patch("src.telegram_bot.handlers.kpis.get_standalone_session", side_effect=mock_standalone), \
          patch("src.telegram_bot.handlers.projections.get_standalone_session", side_effect=mock_standalone), \
          patch("src.telegram_bot.handlers.balance.get_standalone_session", side_effect=mock_standalone):
@@ -99,6 +98,44 @@ async def test_telegram_all_handlers(async_session: AsyncSession):
         assert reply_mock.called
 
 
+def test_telegram_link_code_roundtrip():
+    from src.telegram_bot.linking import consume_link_code, create_link_code
+
+    user_id = uuid.uuid4()
+    entry = create_link_code(user_id)
+    assert consume_link_code("nope") is None
+    assert consume_link_code(entry.code) == user_id
+    assert consume_link_code(entry.code) is None
+
+
+@pytest.mark.asyncio
+async def test_start_without_link_asks_to_connect(async_session: AsyncSession):
+    from src.users.service import get_or_create_default_user
+
+    await get_or_create_default_user(async_session)
+
+    update = MagicMock()
+    update.effective_user = MagicMock()
+    update.effective_user.id = 424242
+    update.effective_user.first_name = "Andre"
+    update.effective_user.username = "andre"
+    reply_mock = AsyncMock()
+    update.effective_message = MagicMock()
+    update.effective_message.reply_text = reply_mock
+    context = MagicMock()
+    context.args = []
+
+    @asynccontextmanager
+    async def mock_standalone():
+        yield async_session
+
+    with patch("src.telegram_bot.handlers.start.get_standalone_session", side_effect=mock_standalone):
+        await start_handler(update, context)
+
+    text = reply_mock.call_args.args[0]
+    assert "not linked" in text.lower()
+
+
 @pytest.mark.asyncio
 async def test_celery_task_wrapper_execution(async_session: AsyncSession):
     user = await get_or_create_user_by_telegram_id(async_session, 888111, "Task User")
@@ -116,7 +153,7 @@ async def test_celery_task_wrapper_execution(async_session: AsyncSession):
         await coro
 
     with patch("src.scheduler.tasks.get_standalone_session", side_effect=mock_standalone), \
-         patch("src.scheduler.tasks.generate_user_monthly_report.delay") as mock_delay, \
+         patch("src.scheduler.tasks.generate_user_monthly_report.delay"), \
          patch("asyncio.run", side_effect=lambda c: asyncio.create_task(c)):
 
         generate_all_monthly_reports.run()

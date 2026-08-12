@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # ── Telegram ──────────────────────────────────────────
     telegram_bot_token: str = ""
 
+    # ── LLM (OpenRouter) ──────────────────────────────────
+    openrouter_api_key: str = ""
+    openrouter_model: str = "x-ai/grok-4.6"
+
     # ── Bank Connection (FinTS) ───────────────────────────
     fints_product_id: str = ""
 

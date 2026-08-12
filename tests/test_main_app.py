@@ -1,9 +1,10 @@
 """Unit tests for main FastAPI application lifecycle and SPA routing."""
 
-import pytest
-from httpx import AsyncClient, ASGITransport
 from contextlib import asynccontextmanager
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from httpx import ASGITransport, AsyncClient
 
 from src.main import app, lifespan
 
@@ -34,7 +35,11 @@ async def test_main_lifespan():
     with patch("src.main.get_standalone_session", side_effect=mock_standalone), \
          patch("src.main.seed_default_categories", new_callable=AsyncMock), \
          patch("src.main.ensure_builtin_kpis_seeded", new_callable=AsyncMock), \
-         patch("src.main.create_telegram_bot", return_value=None), \
+         patch("src.main.apply_default_household_selection", new_callable=AsyncMock), \
+         patch("src.main.reclassify_all_users", new_callable=AsyncMock), \
+         patch("src.main.ensure_schema", new_callable=AsyncMock), \
+         patch("src.main.start_polling", new_callable=AsyncMock), \
+         patch("src.main.stop_polling", new_callable=AsyncMock), \
          patch("src.main.dispose_engine", new_callable=AsyncMock) as mock_dispose_db, \
          patch("src.main.close_redis", new_callable=AsyncMock) as mock_close_redis:
         async with lifespan(mock_app):

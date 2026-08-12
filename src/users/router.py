@@ -1,12 +1,17 @@
 """FastAPI router for User management."""
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-import uuid
 
 from src.core.dependencies import get_db
-from src.users.service import get_or_create_user_by_telegram_id, get_user_by_id
+from src.users.service import (
+    get_or_create_default_user,
+    get_or_create_user_by_telegram_id,
+    get_user_by_id,
+)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -39,6 +44,14 @@ async def create_or_get_user(
         )
     user = await get_or_create_user_by_telegram_id(db, data.telegram_id, data.name)
     return user
+
+
+@router.get("/me", response_model=UserResponse)
+async def read_current_user(
+    db: AsyncSession = Depends(get_db),
+):
+    """Single-user mode: return the first (or newly created default) user."""
+    return await get_or_create_default_user(db)
 
 
 @router.get("/{user_id}", response_model=UserResponse)

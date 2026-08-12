@@ -1,13 +1,14 @@
 """Telegram bot handler for /projection command."""
 
 from datetime import date
+
 from dateutil.relativedelta import relativedelta
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from src.core.database import get_standalone_session
 from src.projections.service import generate_user_projection
-from src.users.service import get_or_create_user_by_telegram_id
+from src.telegram_bot.handlers.common import require_linked_user
 
 
 async def projection_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -15,13 +16,11 @@ async def projection_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not update.effective_user or not update.effective_message:
         return
 
-    tg_user = update.effective_user
+    user = await require_linked_user(update)
+    if user is None:
+        return
 
     async with get_standalone_session() as session:
-        user = await get_or_create_user_by_telegram_id(
-            session, tg_user.id, tg_user.first_name or "User"
-        )
-
         today = date.today()
         first_day = today.replace(day=1)
         last_day = (first_day + relativedelta(months=1)) - date.resolution

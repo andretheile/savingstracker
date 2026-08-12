@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Boolean, JSON, String
+from sqlalchemy import JSON, BigInteger, Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.base_model import Base, TimestampMixin, UUIDMixin

@@ -1,6 +1,7 @@
 """Telegram bot handler for /kpis and /newkpi commands."""
 
 from datetime import date
+
 from dateutil.relativedelta import relativedelta
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -9,7 +10,7 @@ from src.core.database import get_standalone_session
 from src.kpis.engine import kpi_engine
 from src.kpis.models import KPIDefinition
 from src.kpis.service import evaluate_and_save_kpis_for_user
-from src.users.service import get_or_create_user_by_telegram_id
+from src.telegram_bot.handlers.common import require_linked_user
 
 
 async def kpis_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -17,13 +18,11 @@ async def kpis_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not update.effective_user or not update.effective_message:
         return
 
-    tg_user = update.effective_user
+    user = await require_linked_user(update)
+    if user is None:
+        return
 
     async with get_standalone_session() as session:
-        user = await get_or_create_user_by_telegram_id(
-            session, tg_user.id, tg_user.first_name or "User"
-        )
-
         today = date.today()
         first_day = today.replace(day=1)
         last_day = (first_day + relativedelta(months=1)) - date.resolution
@@ -81,11 +80,11 @@ async def newkpi_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
 
-    tg_user = update.effective_user
+    user = await require_linked_user(update)
+    if user is None:
+        return
+
     async with get_standalone_session() as session:
-        user = await get_or_create_user_by_telegram_id(
-            session, tg_user.id, tg_user.first_name or "User"
-        )
         kpi = KPIDefinition(
             user_id=user.id,
             name=name,

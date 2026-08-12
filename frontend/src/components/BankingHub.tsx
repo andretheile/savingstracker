@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { Account } from '../types';
-import { Building2, Shield, CheckCircle2, Lock, Plus } from 'lucide-react';
+import { Building2, Shield, CheckCircle2, Lock, Plus, Smartphone } from 'lucide-react';
 
 interface BankingHubProps {
   accounts: Account[];
@@ -10,8 +10,8 @@ interface BankingHubProps {
 
 export const BankingHub: React.FC<BankingHubProps> = ({ accounts }) => {
   const [showModal, setShowModal] = useState(false);
-  const [blz, setBlz] = useState('10070024');
-  const [login, setLogin] = useState('max.mustermann');
+  const [blz, setBlz] = useState('12030000');
+  const [login, setLogin] = useState('');
   const [pin, setPin] = useState('');
   const [tanRequired, setTanRequired] = useState(false);
   const [tan, setTan] = useState('');
@@ -42,7 +42,7 @@ export const BankingHub: React.FC<BankingHubProps> = ({ accounts }) => {
             <h2 className="text-xl font-bold text-[#1C160C] font-heading">Bank Accounts & FinTS Connections</h2>
           </div>
           <p className="text-xs text-[#6E5E4A]">
-            Secure bank synchronization via German FinTS/HBCI protocols with 2FA/TAN challenge support.
+            Secure bank synchronization via German FinTS/HBCI protocols with 2FA App Approval support (DKB, Sparkasse, Deutsche Bank, ING).
           </p>
         </div>
 
@@ -59,7 +59,7 @@ export const BankingHub: React.FC<BankingHubProps> = ({ accounts }) => {
         {accounts.map((acc) => (
           <div key={acc.id} className="bg-[#FAF7F2] p-5 border border-[#E0D4C1] hover:border-[#C5A059] transition relative overflow-hidden group">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-semibold text-[#6E5E4A]">{acc.bank_name || 'German Bank'}</span>
+              <span className="text-xs font-semibold text-[#6E5E4A]">{acc.bank_name || 'DKB / German Bank'}</span>
               <span className="w-2 h-2 bg-[#B8860B]" />
             </div>
 
@@ -94,16 +94,18 @@ export const BankingHub: React.FC<BankingHubProps> = ({ accounts }) => {
                     type="text"
                     value={blz}
                     onChange={(e) => setBlz(e.target.value)}
-                    className="cream-input text-xs px-3 py-2 w-full"
+                    className="cream-input text-xs px-3 py-2 w-full font-mono"
+                    placeholder="12030000"
                     required
                   />
-                  <span className="text-[10px] text-[#B8860B] mt-1 block font-semibold">10070024 → Deutsche Bank</span>
+                  <span className="text-[10px] text-[#B8860B] mt-1 block font-semibold">12030000 → DKB (Deutsche Kreditbank)</span>
                 </div>
 
                 <div>
-                  <label className="text-xs text-[#4A3E2C] font-semibold block mb-1">Online Banking Username</label>
+                  <label className="text-xs text-[#4A3E2C] font-semibold block mb-1">Online Banking Username / Anmeldename</label>
                   <input
                     type="text"
+                    placeholder="e.g. max.mustermann or Kontonummer"
                     value={login}
                     onChange={(e) => setLogin(e.target.value)}
                     className="cream-input text-xs px-3 py-2 w-full"
@@ -122,7 +124,7 @@ export const BankingHub: React.FC<BankingHubProps> = ({ accounts }) => {
                     required
                   />
                   <span className="text-[10px] text-[#6E5E4A] mt-1 flex items-center gap-1">
-                    <Lock className="w-3 h-3 text-[#B8860B]" /> Ephemeral in-memory handling; never stored.
+                    <Lock className="w-3 h-3 text-[#B8860B]" /> Ephemeral in-memory handling; encrypted with Fernet 256.
                   </span>
                 </div>
 
@@ -146,19 +148,24 @@ export const BankingHub: React.FC<BankingHubProps> = ({ accounts }) => {
 
             {tanRequired && !syncDone && (
               <div className="space-y-4">
-                <div className="p-3 bg-[#F4EFE6] border border-[#D5C7B0] text-xs text-[#7A5C1E]">
-                  <p className="font-bold mb-1">⚠️ 2FA / pushTAN Challenge Initiated</p>
-                  <p>Please approve the login request in your bank's pushTAN application, then enter your TAN code below.</p>
+                <div className="p-3 bg-[#F7F3EB] border border-[#E5DEC9] text-xs text-[#7A602B]">
+                  <p className="font-bold mb-1 flex items-center gap-1.5">
+                    <Smartphone className="w-4 h-4 text-[#A38038]" /> 📲 DKB App Approval Triggered
+                  </p>
+                  <p>1. Open your <strong>DKB App</strong> on your iPhone.<br />
+                     2. Approve the incoming <strong>FinTS / HBCI login request</strong>.<br />
+                     3. Enter your TAN (or type <code>OK</code> for Decoupled App Approval) below and click Verify & Sync.
+                  </p>
                 </div>
 
                 <div>
-                  <label className="text-xs text-[#4A3E2C] font-semibold block mb-1">TAN Code</label>
+                  <label className="text-xs text-[#4A3E2C] font-semibold block mb-1">TAN Code / Decoupled Status</label>
                   <input
                     type="text"
-                    placeholder="e.g. 847293"
+                    placeholder="e.g. OK or 6-digit TAN code"
                     value={tan}
                     onChange={(e) => setTan(e.target.value)}
-                    className="cream-input text-xs font-mono px-3 py-2 w-full text-[#8C6D23]"
+                    className="cream-input text-xs font-mono px-3 py-2 w-full text-[#7A602B]"
                   />
                 </div>
 
@@ -173,10 +180,9 @@ export const BankingHub: React.FC<BankingHubProps> = ({ accounts }) => {
                   <button
                     type="button"
                     onClick={handleVerifyTan}
-                    disabled={!tan}
-                    className="gold-button-primary text-xs px-4 py-2 disabled:opacity-50"
+                    className="gold-button-primary text-xs px-4 py-2"
                   >
-                    Verify TAN & Sync
+                    Verify & Sync Accounts
                   </button>
                 </div>
               </div>
@@ -185,8 +191,8 @@ export const BankingHub: React.FC<BankingHubProps> = ({ accounts }) => {
             {syncDone && (
               <div className="p-6 text-center space-y-3">
                 <CheckCircle2 className="w-12 h-12 text-[#B8860B] mx-auto animate-bounce" />
-                <h4 className="text-base font-bold text-[#1C160C] font-heading">Bank Connected Successfully!</h4>
-                <p className="text-xs text-[#6E5E4A]">Imported transactions and synchronized account balances.</p>
+                <h4 className="text-base font-bold text-[#1C160C] font-heading">DKB Accounts Synced Successfully!</h4>
+                <p className="text-xs text-[#6E5E4A]">Imported Giro, Savings & Depot balances and transactions.</p>
               </div>
             )}
 

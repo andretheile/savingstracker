@@ -18,13 +18,27 @@ from src.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Known FinTS/HBCI Server Endpoints for major German Banks
+KNOWN_FINTS_URLS = {
+    "12030000": "https://fints.banking-dkb.de/fints/",      # DKB (Deutsche Kreditbank)
+    "10070024": "https://fints.deutsche-bank.de/fints",     # Deutsche Bank
+    "37010060": "https://hbci.postbank.de/hbci",            # Postbank
+    "50010517": "https://fints.ing.de/fints/",               # ING
+    "10040000": "https://fints.commerzbank.de/fints/",      # Commerzbank
+    "70020270": "https://hbci-01.hypovereinsbank.de/hbci",   # HypoVereinsbank
+}
+
 
 class FinTSAdapter(BankAdapter):
     """Bank adapter using the FinTS/HBCI protocol for German banks.
 
-    Since python-fints is a synchronous library, all calls are wrapped
-    in asyncio.to_thread() to avoid blocking the event loop.
+    Supports automatic pushTAN / Decoupled 2FA challenge initiation on mobile banking apps.
     """
+
+    def _resolve_url(self, bank_blz: str, fints_url: str) -> str:
+        if not fints_url or "example.com" in fints_url or "localhost" in fints_url:
+            return KNOWN_FINTS_URLS.get(bank_blz, "https://fints.banking-dkb.de/fints/")
+        return fints_url
 
     def _create_client(
         self, bank_blz: str, fints_url: str, login_name: str, pin: str
@@ -32,13 +46,52 @@ class FinTSAdapter(BankAdapter):
         """Create a FinTS3PinTanClient (synchronous, run in thread)."""
         from fints.client import FinTS3PinTanClient
 
+        resolved_url = self._resolve_url(bank_blz, fints_url)
+        logger.info("Initializing FinTS client for BLZ %s at %s", bank_blz, resolved_url)
+
         return FinTS3PinTanClient(
             bank_blz,
             login_name,
             pin,
-            fints_url,
+            resolved_url,
             product_id=settings.fints_product_id or None,
         )
+
+    def _configure_tan_mechanism(self, client: Any) -> None:
+        """Auto-configure pushTAN or Decoupled 2FA mechanism for DKB / German banks."""
+        try:
+            tan_mechs = client.get_tan_mechanisms()
+            if not tan_mechs:
+                return
+
+            push_mech_id = None
+            for sec_func, param in tan_mechs.items():
+                name = getattr(param, "name", "") or str(param)
+                logger.info("Bank TAN mechanism available: %s -> %s", sec_func, name)
+                # DKB / German pushTAN methods (e.g. 921, 922, pushTAN, Decoupled, DKB-Code)
+                name_lower = name.lower()
+                if "push" in name_lower or "app" in name_lower or "code" in name_lower or "decoupled" in name_lower or sec_func in ("921", "922", "911"):
+                    push_mech_id = sec_func
+                    break
+
+            if not push_mech_id:
+                push_mech_id = list(tan_mechs.keys())[0]
+
+            logger.info("Selected TAN mechanism ID: %s", push_mech_id)
+            client.set_tan_mechanism(push_mech_id)
+
+            # Try setting registered TAN medium (e.g., iPhone / device name)
+            try:
+                media = client.get_tan_media()
+                if media:
+                    medium_name = media[0][0] if isinstance(media[0], (tuple, list)) else media[0]
+                    logger.info("Selecting TAN medium: %s", medium_name)
+                    client.set_tan_medium(medium_name)
+            except Exception as me:
+                logger.debug("TAN media selection note: %s", me)
+
+        except Exception as e:
+            logger.warning("Auto-configuring TAN mechanism note: %s", e)
 
     async def connect(
         self, bank_blz: str, fints_url: str, login_name: str, pin: str
@@ -52,16 +105,18 @@ class FinTSAdapter(BankAdapter):
             # Enter the dialog context
             dialog_data = await asyncio.to_thread(client.__enter__)
 
+            # Configure pushTAN / Decoupled 2FA mechanism
+            await asyncio.to_thread(self._configure_tan_mechanism, client)
+
             # Check for TAN requirement
             if client.init_tan_response:
                 tan_response = client.init_tan_response
+                challenge_msg = getattr(tan_response, "challenge", "Please approve login in your DKB Banking App on your iPhone")
                 return AuthResult(
                     success=True,
                     requires_tan=True,
-                    tan_challenge=getattr(tan_response, "challenge", "Please enter TAN"),
-                    tan_type=getattr(
-                        tan_response, "challenge_hhduc", "pushTAN"
-                    ),
+                    tan_challenge=challenge_msg,
+                    tan_type="pushTAN / App Approval",
                     session_data={"client": client, "tan_response": tan_response},
                 )
 
@@ -76,12 +131,13 @@ class FinTSAdapter(BankAdapter):
             return AuthResult(success=False, error=str(e))
 
     async def handle_tan(self, session_data: Any, tan: str) -> AuthResult:
-        """Submit TAN to the bank for verification."""
+        """Submit TAN or confirm App approval to the bank."""
         try:
             client = session_data["client"]
-            tan_response = session_data["tan_response"]
+            tan_response = session_data.get("tan_response")
 
-            await asyncio.to_thread(client.send_tan, tan_response, tan)
+            if tan_response:
+                await asyncio.to_thread(client.send_tan, tan_response, tan)
 
             return AuthResult(
                 success=True,
@@ -121,7 +177,6 @@ class FinTSAdapter(BankAdapter):
             client = session_data["client"]
             sepa_accounts = await asyncio.to_thread(client.get_sepa_accounts)
 
-            # Find the matching account by IBAN
             target_account = None
             for acc in sepa_accounts:
                 if getattr(acc, "iban", "") == iban:
@@ -132,20 +187,17 @@ class FinTSAdapter(BankAdapter):
                 logger.warning("Account with IBAN %s not found", iban)
                 return []
 
-            # Fetch statements
             statements = await asyncio.to_thread(
                 client.get_statement, target_account, since, date.today()
             )
 
             transactions = []
             for stmt in statements:
-                # stmt is an mt940 transaction object
                 tx_date = getattr(stmt.data, "date", None) or getattr(stmt, "date", since)
                 amount = getattr(stmt.data, "amount", None) or getattr(stmt, "amount", None)
                 if amount is None:
                     continue
 
-                # Extract amount as Decimal
                 if hasattr(amount, "amount"):
                     amt = Decimal(str(amount.amount))
                 else:

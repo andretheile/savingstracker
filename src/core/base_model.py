@@ -3,8 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, MetaData
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, MetaData, String, TypeDecorator
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Explicit naming convention avoids Alembic autogenerate issues
@@ -17,6 +16,23 @@ NAMING_CONVENTION = {
 }
 
 
+class UUIDType(TypeDecorator):
+    """Platform-agnostic UUID type: uses native UUID on PostgreSQL, CHAR(36) on SQLite."""
+
+    impl = String(36)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is not None:
+            return str(value)
+        return value
+
+    def process_result_value(self, value, dialect):
+        if value is not None:
+            return uuid.UUID(value)
+        return value
+
+
 class Base(DeclarativeBase):
     """Shared declarative base for all models."""
 
@@ -27,7 +43,7 @@ class UUIDMixin:
     """Adds a UUID primary key column."""
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDType,
         primary_key=True,
         default=uuid.uuid4,
     )

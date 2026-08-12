@@ -6,10 +6,9 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import Boolean, Date, ForeignKey, Index, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.core.base_model import Base, TimestampMixin, UUIDMixin
+from src.core.base_model import Base, TimestampMixin, UUIDMixin, UUIDType
 
 
 class Transaction(UUIDMixin, TimestampMixin, Base):
@@ -22,18 +21,18 @@ class Transaction(UUIDMixin, TimestampMixin, Base):
     )
 
     account_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDType,
         ForeignKey("accounts.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     category_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDType,
         ForeignKey("categories.id", ondelete="SET NULL"),
         nullable=True,
     )
     bank_connection_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDType,
         ForeignKey("bank_connections.id", ondelete="SET NULL"),
         nullable=True,
     )

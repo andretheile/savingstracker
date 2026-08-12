@@ -5,10 +5,9 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.core.base_model import Base, TimestampMixin, UUIDMixin
+from src.core.base_model import Base, TimestampMixin, UUIDMixin, UUIDType
 
 
 class Category(UUIDMixin, TimestampMixin, Base):
@@ -17,13 +16,13 @@ class Category(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "categories"
 
     user_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDType,
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=True,  # NULL = system default category
         index=True,
     )
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDType,
         ForeignKey("categories.id", ondelete="SET NULL"),
         nullable=True,
     )
@@ -49,13 +48,13 @@ class ClassificationRule(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "classification_rules"
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDType,
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     category_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDType,
         ForeignKey("categories.id", ondelete="CASCADE"),
         nullable=False,
     )

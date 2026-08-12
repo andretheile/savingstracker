@@ -19,6 +19,7 @@ import src.scheduler.models  # noqa
 
 from src.accounts.router import router as accounts_router
 from src.balance_sheets.router import router as balance_sheets_router
+from src.banking.router import router as banking_router
 from src.classification.service import seed_default_categories
 from src.config import settings
 from src.core.cache import close_redis
@@ -80,6 +81,7 @@ app = FastAPI(
 # Register REST API routers under /api prefix
 app.include_router(users_router, prefix="/api")
 app.include_router(accounts_router, prefix="/api")
+app.include_router(banking_router, prefix="/api")
 app.include_router(transactions_router, prefix="/api")
 app.include_router(kpis_router, prefix="/api")
 app.include_router(projections_router, prefix="/api")

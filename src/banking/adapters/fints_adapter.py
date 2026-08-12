@@ -54,7 +54,7 @@ class FinTSAdapter(BankAdapter):
             login_name,
             pin,
             resolved_url,
-            product_id=settings.fints_product_id or None,
+            product_id=settings.fints_product_id or "9FA6681DEC0593B6D87093202",
         )
 
     def _configure_tan_mechanism(self, client: Any) -> None:

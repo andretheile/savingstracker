@@ -6,10 +6,9 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, JSON, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.core.base_model import Base, TimestampMixin, UUIDMixin
+from src.core.base_model import Base, TimestampMixin, UUIDMixin, UUIDType
 
 
 class KPIDefinition(UUIDMixin, TimestampMixin, Base):
@@ -18,7 +17,7 @@ class KPIDefinition(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "kpi_definitions"
 
     user_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDType,
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
@@ -29,7 +28,7 @@ class KPIDefinition(UUIDMixin, TimestampMixin, Base):
     unit: Mapped[str] = mapped_column(String(16), nullable=False, default="%")
     period: Mapped[str] = mapped_column(String(16), nullable=False, default="monthly")
     required_variables: Mapped[dict | None] = mapped_column(
-        JSON().with_variant(JSONB, "postgresql"), nullable=True
+        JSON, nullable=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
@@ -44,13 +43,13 @@ class KPISnapshot(UUIDMixin, Base):
     __tablename__ = "kpi_snapshots"
 
     kpi_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDType,
         ForeignKey("kpi_definitions.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDType,
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -59,7 +58,7 @@ class KPISnapshot(UUIDMixin, Base):
     period_end: Mapped[date] = mapped_column(Date, nullable=False)
     value: Mapped[float] = mapped_column(Numeric(precision=14, scale=4), nullable=False)
     variable_values: Mapped[dict | None] = mapped_column(
-        JSON().with_variant(JSONB, "postgresql"), nullable=True
+        JSON, nullable=True
     )
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

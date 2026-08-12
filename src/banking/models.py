@@ -6,10 +6,9 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.core.base_model import Base, TimestampMixin, UUIDMixin
+from src.core.base_model import Base, TimestampMixin, UUIDMixin, UUIDType
 
 
 class BankConnection(UUIDMixin, TimestampMixin, Base):
@@ -18,7 +17,7 @@ class BankConnection(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "bank_connections"
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        UUIDType, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     bank_blz: Mapped[str] = mapped_column(String(16), nullable=False)
     bank_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")

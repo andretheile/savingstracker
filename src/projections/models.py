@@ -6,10 +6,9 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.core.base_model import Base, TimestampMixin, UUIDMixin
+from src.core.base_model import Base, TimestampMixin, UUIDMixin, UUIDType
 
 
 class ProjectionConfig(UUIDMixin, TimestampMixin, Base):
@@ -18,7 +17,7 @@ class ProjectionConfig(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "projection_configs"
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDType,
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -54,13 +53,13 @@ class ProjectionSnapshot(UUIDMixin, Base):
     __tablename__ = "projection_snapshots"
 
     projection_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDType,
         ForeignKey("projection_configs.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDType,
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -79,7 +78,7 @@ class ProjectionSnapshot(UUIDMixin, Base):
         Numeric(precision=14, scale=2), nullable=False
     )
     scenarios: Mapped[dict | None] = mapped_column(
-        JSON().with_variant(JSONB, "postgresql"), nullable=True
+        JSON, nullable=True
     )
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

@@ -28,6 +28,7 @@ services:
       retries: 5
 
   app:
+    image: ghcr.io/andretheile/savingstracker:latest
     build: .
     depends_on:
       db:
@@ -38,6 +39,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://savingstracker:${DB_PASSWORD:-changeme}@db:5432/savingstracker
       REDIS_URL: redis://redis:6379/0
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-x-ai/grok-4.6}
       FINTS_PRODUCT_ID: ${FINTS_PRODUCT_ID:-}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -48,6 +51,7 @@ services:
       sh -c "alembic upgrade head && python -m src.main"
 
   worker:
+    image: ghcr.io/andretheile/savingstracker:latest
     build: .
     depends_on:
       db:
@@ -58,6 +62,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://savingstracker:${DB_PASSWORD:-changeme}@db:5432/savingstracker
       REDIS_URL: redis://redis:6379/0
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-x-ai/grok-4.6}
       FINTS_PRODUCT_ID: ${FINTS_PRODUCT_ID:-}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -66,6 +72,7 @@ services:
       replicas: 2
 
   beat:
+    image: ghcr.io/andretheile/savingstracker:latest
     build: .
     depends_on:
       db:

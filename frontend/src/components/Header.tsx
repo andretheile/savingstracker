@@ -1,10 +1,12 @@
 import React from 'react';
-import { RefreshCw, Send, Plus, Search, Crown } from 'lucide-react';
+import { RefreshCw, Plus, Search, Settings } from 'lucide-react';
 
 interface HeaderProps {
   onSyncBank: () => void;
   onOpenNewTx: () => void;
   onOpenNewKpi: () => void;
+  onOpenSettings: () => void;
+  settingsActive?: boolean;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   isSyncing: boolean;
@@ -13,71 +15,68 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   onSyncBank,
   onOpenNewTx,
+  onOpenSettings,
+  settingsActive = false,
   searchQuery,
   setSearchQuery,
   isSyncing,
 }) => {
   return (
-    <header className="sticky top-0 z-40 cream-panel border-b border-[#E5DEC9] px-6 py-4 bg-[#FFFFFF]/95 backdrop-blur-md">
-      <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-        
-        {/* Brand & Logo */}
-        <div className="flex items-center gap-3.5">
-          <div className="w-10 h-10 bg-[#1A150E] border border-[#C5A059] flex items-center justify-center text-[#F4E5C2]">
-            <Crown className="w-5 h-5 text-[#E5C158]" />
+    <header className="py-3.5">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-[#1A1714] flex items-center justify-center rounded-sm shrink-0">
+            <span className="text-[#F4F1EA] font-heading text-[13px] font-semibold tracking-tight leading-none">S</span>
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-extrabold tracking-tight text-[#1A150E] font-heading">
-                Savings<span className="text-[#A38038]">Tracker</span>
-              </h1>
-              <span className="px-2.5 py-0.5 text-[10px] font-bold tracking-widest uppercase bg-[#F7F3EB] text-[#8C6D23] border border-[#E5DEC9]">
-                FinTS / HBCI Active
-              </span>
-            </div>
-            <p className="text-[11px] text-[#6E604D] font-medium">Modular Financial Intelligence & Custom KPI Engine</p>
+          <div className="leading-tight">
+            <h1 className="text-[15px] font-semibold tracking-tight text-[#1A1714] font-heading">
+              SavingsTracker
+            </h1>
+            <p className="text-[11px] text-[#8A8278]">Personal finance</p>
           </div>
         </div>
 
-        {/* Search & Actions */}
-        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-          {/* Search */}
-          <div className="relative flex-1 md:flex-initial min-w-[220px]">
-            <Search className="absolute left-3.5 top-2.5 w-4 h-4 text-[#8C7B65]" />
+        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+          <div className="relative flex-1 md:flex-initial md:w-[220px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#8A8278] pointer-events-none" strokeWidth={1.6} />
             <input
               type="text"
-              placeholder="Search accounts, rules, KPIs..."
+              placeholder="Search transactions…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="cream-input pl-9 pr-4 py-2 text-xs w-full focus:outline-none placeholder:text-[#9A8B76]"
+              className="cream-input h-8 pl-9 pr-3 text-xs w-full focus:outline-none placeholder:text-[#A39B90]"
             />
           </div>
 
-          {/* Telegram Status */}
-          <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-[#F7F3EB] border border-[#E5DEC9] text-[#7A602B] text-xs font-semibold">
-            <Send className="w-3.5 h-3.5 text-[#A38038]" />
-            <span>Telegram Bot Connected</span>
-          </div>
-
-          {/* Action Buttons */}
           <button
             onClick={onSyncBank}
             disabled={isSyncing}
-            className="cream-button px-3.5 py-2 text-xs font-semibold text-[#1A150E] flex items-center gap-2 border-[#E5DEC9] disabled:opacity-50"
+            className="cream-button h-8 px-3 text-xs font-medium flex items-center gap-2 disabled:opacity-50"
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-[#A38038] ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>{isSyncing ? 'Syncing Bank...' : 'Sync Banks'}</span>
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} strokeWidth={1.6} />
+            <span>{isSyncing ? 'Syncing…' : 'Sync'}</span>
           </button>
 
           <button
             onClick={onOpenNewTx}
-            className="gold-button-primary px-4 py-2 text-xs flex items-center gap-1.5"
+            className="gold-button-primary h-8 px-3.5 text-xs flex items-center gap-1.5"
           >
-            <Plus className="w-4 h-4 text-[#E5C158]" />
-            <span>Add Transaction</span>
+            <Plus className="w-3.5 h-3.5" strokeWidth={1.6} />
+            <span>Add transaction</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            aria-label="Settings"
+            aria-pressed={settingsActive}
+            className={`cream-button h-8 w-8 px-0 ${
+              settingsActive ? 'border-[#C4B49A] bg-[#F3F0EA] text-[#1A1714]' : 'text-[#6B645A]'
+            }`}
+          >
+            <Settings className="w-3.5 h-3.5" strokeWidth={1.6} />
           </button>
         </div>
-
       </div>
     </header>
   );

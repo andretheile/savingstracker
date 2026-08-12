@@ -13,6 +13,7 @@ interface BankingHubProps {
   accounts: Account[];
   onSyncBank: () => void;
   isSyncing: boolean;
+  onDataChanged?: () => void;
 }
 
 interface BankAccount {
@@ -21,9 +22,10 @@ interface BankAccount {
   iban: string | null;
   currency: string;
   current_balance: number;
+  include_in_household?: boolean;
 }
 
-export const BankingHub: React.FC<BankingHubProps> = () => {
+export const BankingHub: React.FC<BankingHubProps> = ({ onDataChanged }) => {
   const [showModal, setShowModal] = useState(false);
   const [blz, setBlz] = useState('12030000');
   const [login, setLogin] = useState('');
@@ -98,6 +100,7 @@ export const BankingHub: React.FC<BankingHubProps> = () => {
         setAccountsFound(result.accounts_found || 0);
         setSyncDone(true);
         await fetchAccounts();
+        onDataChanged?.();
         setTimeout(() => resetModal(), 2500);
       }
     } catch (e) {
@@ -118,7 +121,7 @@ export const BankingHub: React.FC<BankingHubProps> = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: sessionId,
-          tan: tan || 'OK',
+          tan: tan,
         }),
       });
 
@@ -133,6 +136,7 @@ export const BankingHub: React.FC<BankingHubProps> = () => {
       setAccountsFound(result.accounts_found || 0);
       setSyncDone(true);
       await fetchAccounts();
+      onDataChanged?.();
       setTimeout(() => resetModal(), 2500);
     } catch (e) {
       setErrorMsg(`Network error: ${e}`);
@@ -157,12 +161,9 @@ export const BankingHub: React.FC<BankingHubProps> = () => {
     <div className="cream-panel p-6 mb-8">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <Building2 className="w-5 h-5 text-[#B8860B]" />
-            <h2 className="text-xl font-bold text-[#1C160C] font-heading">Bank Accounts & FinTS Connections</h2>
-          </div>
-          <p className="text-xs text-[#6E5E4A]">
-            Secure bank synchronization via German FinTS/HBCI protocols with 2FA App Approval support (DKB, Sparkasse, Deutsche Bank, ING).
+          <h2 className="text-lg font-semibold text-[#1A1714] font-heading">Banking</h2>
+          <p className="text-xs text-[#6B645A] mt-0.5">
+            Savings rate uses household accounts only. Mark salary accounts as Personal so transfers into the household count as income.
           </p>
         </div>
 
@@ -170,82 +171,98 @@ export const BankingHub: React.FC<BankingHubProps> = () => {
           <button
             onClick={fetchAccounts}
             disabled={isLoadingAccounts}
-            className="cream-button px-3 py-2 text-xs flex items-center gap-1.5"
+            className="cream-button px-3 text-xs flex items-center gap-1.5"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAccounts ? 'animate-spin' : ''}`} /> Refresh
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAccounts ? 'animate-spin' : ''}`} strokeWidth={1.6} /> Refresh
           </button>
           <button
             onClick={() => setShowModal(true)}
-            className="gold-button-primary px-4 py-2 text-xs flex items-center gap-1.5 shadow-sm"
+            className="gold-button-primary px-3.5 text-xs flex items-center gap-1.5"
           >
-            <Plus className="w-4 h-4 text-[#E5C158]" /> Link New Bank Account
+            <Plus className="w-3.5 h-3.5" strokeWidth={1.6} /> Link account
           </button>
         </div>
       </div>
 
-      {/* Account Cards Grid */}
       {bankAccounts.length === 0 && !isLoadingAccounts && (
-        <div className="p-8 text-center border border-dashed border-[#D5C7B0] bg-[#FAF7F2]">
-          <Building2 className="w-10 h-10 text-[#C5A059] mx-auto mb-3 opacity-50" />
-          <p className="text-sm text-[#6E5E4A] font-semibold mb-1">No bank accounts linked yet</p>
-          <p className="text-xs text-[#9A8E7A]">Click "Link New Bank Account" to connect your DKB or other German bank via FinTS.</p>
+        <div className="p-10 text-center border border-[#E5DFD4] bg-[#F3F0EA]">
+          <Building2 className="w-7 h-7 text-[#8A8278] mx-auto mb-3" strokeWidth={1.4} />
+          <p className="text-sm text-[#1A1714] font-medium mb-1">No accounts linked</p>
+          <p className="text-xs text-[#8A8278]">Connect a bank to import balances and transactions.</p>
         </div>
       )}
 
       {isLoadingAccounts && bankAccounts.length === 0 && (
         <div className="p-8 text-center">
-          <Loader2 className="w-8 h-8 text-[#B8860B] mx-auto mb-2 animate-spin" />
-          <p className="text-xs text-[#6E5E4A]">Loading accounts...</p>
+          <Loader2 className="w-5 h-5 text-[#8A8278] mx-auto mb-2 animate-spin" />
+          <p className="text-xs text-[#6B645A]">Loading accounts…</p>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {bankAccounts.map((acc) => (
-          <div key={acc.id} className="bg-[#FAF7F2] p-5 border border-[#E0D4C1] hover:border-[#C5A059] transition relative overflow-hidden group">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {bankAccounts.map((acc) => {
+          const household = acc.include_in_household !== false;
+          return (
+          <div key={acc.id} className={`p-5 border ${household ? 'border-[#C4B49A]' : 'border-[#E5DFD4]'}`}>
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-semibold text-[#6E5E4A]">DKB / FinTS</span>
-              <span className="w-2 h-2 bg-[#4CAF50]" title="Connected" />
+              <span className="text-[11px] font-medium text-[#8A8278]">
+                {household ? 'Household' : 'Personal'}
+              </span>
+              <span className="w-1.5 h-1.5 bg-[#3D6B54]" title="Connected" />
             </div>
 
-            <h3 className="text-sm font-bold text-[#1C160C] mb-1">{acc.name}</h3>
-            <code className="text-[11px] font-mono text-[#7A6E5D] block mb-4">{acc.iban || 'No IBAN'}</code>
+            <h3 className="text-sm font-medium text-[#1A1714] mb-1">{acc.name}</h3>
+            <code className="text-[11px] font-mono text-[#8A8278] block mb-4">{acc.iban || 'No IBAN'}</code>
 
-            <div className="flex items-baseline justify-between border-t border-[#E0D4C1] pt-3">
-              <span className="text-xs text-[#6E5E4A]">Current Balance</span>
-              <span className="text-lg font-extrabold text-[#B8860B] font-heading">
+            <div className="flex items-baseline justify-between border-t border-[#E5DFD4] pt-3">
+              <span className="text-xs text-[#6B645A]">Balance</span>
+              <span className="text-base font-semibold text-[#1A1714] font-heading tabular-nums">
                 €{acc.current_balance.toLocaleString('de-DE', { minimumFractionDigits: 2 })}
               </span>
             </div>
+
+            <button
+              type="button"
+              onClick={async () => {
+                await fetch(`${getApiBase()}/accounts/${acc.id}/household`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ include_in_household: !household }),
+                });
+                await fetchAccounts();
+                onDataChanged?.();
+              }}
+              className="mt-3 w-full cream-button text-[11px] py-1.5"
+            >
+              {household ? 'Exclude from household totals' : 'Include in household totals'}
+            </button>
           </div>
-        ))}
+          );
+        })}
       </div>
 
-      {/* FinTS Connection Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1C160C]/60 backdrop-blur-sm">
-          <div className="cream-panel p-6 max-w-md w-full border border-[#C5A059] shadow-2xl relative bg-[#FFFFFF]">
-            
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1A1714]/40 backdrop-blur-[2px]">
+          <div className="cream-panel p-6 max-w-md w-full relative bg-[#FFFFFF]">
             <div className="flex items-center gap-2 mb-4">
-              <Shield className="w-5 h-5 text-[#B8860B]" />
-              <h3 className="text-lg font-bold text-[#1C160C] font-heading">Connect Bank via FinTS/HBCI</h3>
+              <Shield className="w-4 h-4 text-[#8F7848]" strokeWidth={1.6} />
+              <h3 className="text-base font-semibold text-[#1A1714] font-heading">Connect bank</h3>
             </div>
 
-            {/* Error message */}
             {errorMsg && (
-              <div className="p-3 mb-4 bg-[#FFF3E0] border border-[#E0A030] text-xs text-[#7A4A00] flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <div className="p-3 mb-4 bg-[#FAF4F2] border border-[#E8D4CE] text-xs text-[#8C4A3A] flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" strokeWidth={1.6} />
                 <div>
-                  <p className="font-bold mb-0.5">Connection Error</p>
+                  <p className="font-medium mb-0.5">Connection failed</p>
                   <p>{errorMsg}</p>
                 </div>
               </div>
             )}
 
-            {/* Step 1: Credentials */}
             {!tanRequired && !syncDone && (
               <form onSubmit={handleConnectBank} className="space-y-4">
                 <div>
-                  <label className="text-xs text-[#4A3E2C] font-semibold block mb-1">Bankleitzahl (BLZ)</label>
+                  <label className="text-xs text-[#6B645A] font-medium block mb-1">Bank code (BLZ)</label>
                   <input
                     type="text"
                     value={blz}
@@ -254,14 +271,14 @@ export const BankingHub: React.FC<BankingHubProps> = () => {
                     placeholder="12030000"
                     required
                   />
-                  <span className="text-[10px] text-[#B8860B] mt-1 block font-semibold">12030000 → DKB (Deutsche Kreditbank)</span>
+                  <span className="text-[10px] text-[#8A8278] mt-1 block">12030000 — DKB</span>
                 </div>
 
                 <div>
-                  <label className="text-xs text-[#4A3E2C] font-semibold block mb-1">Online Banking Username / Anmeldename</label>
+                  <label className="text-xs text-[#6B645A] font-medium block mb-1">Username</label>
                   <input
                     type="text"
-                    placeholder="e.g. max.mustermann or Kontonummer"
+                    placeholder="Online banking login"
                     value={login}
                     onChange={(e) => setLogin(e.target.value)}
                     className="cream-input text-xs px-3 py-2 w-full"
@@ -270,7 +287,7 @@ export const BankingHub: React.FC<BankingHubProps> = () => {
                 </div>
 
                 <div>
-                  <label className="text-xs text-[#4A3E2C] font-semibold block mb-1">Banking PIN</label>
+                  <label className="text-xs text-[#6B645A] font-medium block mb-1">PIN</label>
                   <input
                     type="password"
                     placeholder="••••••••"
@@ -279,8 +296,8 @@ export const BankingHub: React.FC<BankingHubProps> = () => {
                     className="cream-input text-xs px-3 py-2 w-full"
                     required
                   />
-                  <span className="text-[10px] text-[#6E5E4A] mt-1 flex items-center gap-1">
-                    <Lock className="w-3 h-3 text-[#B8860B]" /> Ephemeral in-memory handling; encrypted with Fernet 256.
+                  <span className="text-[10px] text-[#8A8278] mt-1.5 flex items-center gap-1">
+                    <Lock className="w-3 h-3" strokeWidth={1.6} /> Held in memory only, encrypted in transit.
                   </span>
                 </div>
 
@@ -288,7 +305,7 @@ export const BankingHub: React.FC<BankingHubProps> = () => {
                   <button
                     type="button"
                     onClick={resetModal}
-                    className="cream-button text-xs font-semibold px-4 py-2"
+                    className="cream-button text-xs font-medium px-4 py-2"
                   >
                     Cancel
                   </button>
@@ -298,39 +315,39 @@ export const BankingHub: React.FC<BankingHubProps> = () => {
                     className="gold-button-primary text-xs px-4 py-2 flex items-center gap-1.5"
                   >
                     {isConnecting ? (
-                      <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Connecting...</>
+                      <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Connecting…</>
                     ) : (
-                      'Connect & Authenticate'
+                      'Connect'
                     )}
                   </button>
                 </div>
               </form>
             )}
 
-            {/* Step 2: TAN / App Approval */}
             {tanRequired && !syncDone && (
               <div className="space-y-4">
-                <div className="p-3 bg-[#F7F3EB] border border-[#E5DEC9] text-xs text-[#7A602B]">
-                  <p className="font-bold mb-1 flex items-center gap-1.5">
-                    <Smartphone className="w-4 h-4 text-[#A38038]" /> 📲 Bank App Approval Required
+                <div className="p-3.5 bg-[#F3F0EA] border border-[#E5DFD4] text-xs text-[#6B645A]">
+                  <p className="font-medium mb-1.5 flex items-center gap-1.5 text-[#1A1714]">
+                    <Smartphone className="w-3.5 h-3.5" strokeWidth={1.6} /> App approval required
                   </p>
-                  <p className="whitespace-pre-line">{tanChallenge || 'Please approve the login request in your banking app on your phone.'}</p>
-                  <div className="mt-2 pt-2 border-t border-[#E5DEC9]">
-                    <p>1. Open your <strong>DKB App</strong> on your iPhone.<br />
-                       2. Approve the incoming <strong>FinTS/HBCI login request</strong>.<br />
-                       3. Enter the TAN below (or type <code className="bg-[#EDE7DA] px-1">OK</code> for Decoupled App Approval).
-                    </p>
+                  <p className="whitespace-pre-line">{tanChallenge || 'Approve the login request in your banking app.'}</p>
+                  <div className="mt-2.5 pt-2.5 border-t border-[#E5DFD4] space-y-1">
+                    <p>1. Open the DKB app</p>
+                    <p>2. Approve the FinTS login request</p>
+                    <p>3. Confirm here — the server waits up to two minutes</p>
                   </div>
                 </div>
 
                 <div>
-                  <label className="text-xs text-[#4A3E2C] font-semibold block mb-1">TAN Code / Decoupled Status</label>
+                  <label className="text-xs text-[#6B645A] font-medium block mb-1">
+                    TAN <span className="font-normal text-[#8A8278]">(chipTAN only — leave empty for app approval)</span>
+                  </label>
                   <input
                     type="text"
-                    placeholder="e.g. OK or 6-digit TAN code"
+                    placeholder="Optional"
                     value={tan}
                     onChange={(e) => setTan(e.target.value)}
-                    className="cream-input text-xs font-mono px-3 py-2 w-full text-[#7A602B]"
+                    className="cream-input text-xs font-mono px-3 py-2 w-full"
                   />
                 </div>
 
@@ -338,7 +355,7 @@ export const BankingHub: React.FC<BankingHubProps> = () => {
                   <button
                     type="button"
                     onClick={() => { setTanRequired(false); setErrorMsg(''); }}
-                    className="cream-button text-xs font-semibold px-4 py-2"
+                    className="cream-button text-xs font-medium px-4 py-2"
                   >
                     Back
                   </button>
@@ -349,32 +366,29 @@ export const BankingHub: React.FC<BankingHubProps> = () => {
                     className="gold-button-primary text-xs px-4 py-2 flex items-center gap-1.5"
                   >
                     {isConnecting ? (
-                      <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Verifying...</>
+                      <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Waiting…</>
                     ) : (
-                      'Verify & Sync Accounts'
+                      'Approved in app'
                     )}
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Step 3: Success */}
             {syncDone && (
-              <div className="p-6 text-center space-y-3">
-                <CheckCircle2 className="w-12 h-12 text-[#4CAF50] mx-auto" />
-                <h4 className="text-base font-bold text-[#1C160C] font-heading">Bank Accounts Synced!</h4>
-                <p className="text-xs text-[#6E5E4A]">
+              <div className="py-6 text-center space-y-2">
+                <CheckCircle2 className="w-8 h-8 text-[#3D6B54] mx-auto" strokeWidth={1.5} />
+                <h4 className="text-sm font-semibold text-[#1A1714] font-heading">Accounts connected</h4>
+                <p className="text-xs text-[#6B645A]">
                   {accountsFound > 0
-                    ? `Found and imported ${accountsFound} account${accountsFound > 1 ? 's' : ''}.`
-                    : 'Connection established. Accounts are being processed.'}
+                    ? `${accountsFound} account${accountsFound > 1 ? 's' : ''} imported.`
+                    : 'Connection established.'}
                 </p>
               </div>
             )}
-
           </div>
         </div>
       )}
-
     </div>
   );
 };

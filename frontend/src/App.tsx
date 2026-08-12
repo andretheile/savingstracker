@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Header } from './components/Header';
 import { MetricCards } from './components/MetricCards';
 import { ProjectionSimulator } from './components/ProjectionSimulator';
@@ -7,37 +7,99 @@ import { BalanceSheetView } from './components/BalanceSheetView';
 import { BankingHub } from './components/BankingHub';
 import { TransactionsTable } from './components/TransactionsTable';
 import { TelegramStatusCard } from './components/TelegramStatusCard';
+import { ChatView } from './components/ChatView';
+import { fetchJson, loadDashboard } from './api';
+import type { Account, BalanceSheetData, KPISnapshot, Transaction } from './types';
 
-import {
-  INITIAL_ACCOUNTS,
-  INITIAL_KPIS,
-  INITIAL_TRANSACTIONS,
-  MOCK_BALANCE_SHEET,
-} from './data/mockData';
-import type { Account, KPISnapshot, Transaction } from './types';
+const EMPTY_SHEET: BalanceSheetData = {
+  period_name: '',
+  total_income: 0,
+  total_expense: 0,
+  net_cashflow: 0,
+  savings_rate_pct: 0,
+  income_items: [],
+  expense_items: [],
+  account_balances: {},
+};
+
+const TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'chat', label: 'Chat' },
+  { id: 'simulator', label: 'Projections' },
+  { id: 'kpis', label: 'KPIs' },
+  { id: 'banking', label: 'Banking' },
+  { id: 'transactions', label: 'Transactions' },
+] as const;
+
+type TabId = (typeof TABS)[number]['id'] | 'settings';
 
 export function App() {
-  const [accounts] = useState<Account[]>(INITIAL_ACCOUNTS);
-  const [kpis, setKpis] = useState<KPISnapshot[]>(INITIAL_KPIS);
-  const [transactions, setTransactions] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [kpis, setKpis] = useState<KPISnapshot[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [balanceSheet, setBalanceSheet] = useState<BalanceSheetData>(EMPTY_SHEET);
+  const [periodDays, setPeriodDays] = useState(30);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'simulator' | 'kpis' | 'banking' | 'transactions'>('overview');
+  const [activeTab, setActiveTab] = useState<TabId>('overview');
 
-  const handleSyncBank = () => {
+  const refresh = useCallback(async () => {
+    const data = await loadDashboard();
+    setUserId(data.userId);
+    setAccounts(data.accounts);
+    setTransactions(data.transactions);
+    setBalanceSheet(data.balanceSheet);
+    setKpis(data.kpis);
+    setPeriodDays(data.period.days);
+  }, []);
+
+  useEffect(() => {
+    refresh().catch((err) => console.error('Failed to load dashboard', err));
+  }, [refresh]);
+
+  const handleSyncBank = async () => {
     setIsSyncing(true);
-    setTimeout(() => {
+    try {
+      await refresh();
+    } finally {
       setIsSyncing(false);
-    }, 2000);
+    }
   };
 
-  const handleAddKpi = (newKpi: KPISnapshot) => {
-    setKpis([newKpi, ...kpis]);
+  const handleAddKpi = async (newKpi: KPISnapshot) => {
+    if (!userId) return;
+    await fetchJson('/kpis/', {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: userId,
+        name: newKpi.name,
+        formula: newKpi.formula,
+        unit: newKpi.unit,
+        description: newKpi.description || '',
+      }),
+    });
+    await refresh();
   };
 
-  const handleClassifyTx = (txId: string, catName: string, catIcon: string) => {
-    setTransactions(
-      transactions.map((tx) =>
+  const handleExcludeTx = async (txId: string, exclude: boolean) => {
+    setTransactions((prev) =>
+      prev.map((tx) => (tx.id === txId ? { ...tx, exclude_from_totals: exclude } : tx))
+    );
+    try {
+      await fetchJson(`/transactions/${txId}/exclude`, {
+        method: 'PATCH',
+        body: JSON.stringify({ exclude_from_totals: exclude }),
+      });
+      await refresh();
+    } catch (err) {
+      console.error('Failed to update exclude flag', err);
+    }
+  };
+
+  const handleClassifyTx = async (txId: string, catName: string, catIcon: string) => {
+    setTransactions((prev) =>
+      prev.map((tx) =>
         tx.id === txId
           ? {
               ...tx,
@@ -48,125 +110,118 @@ export function App() {
           : tx
       )
     );
+    try {
+      await fetchJson(`/transactions/${txId}/category`, {
+        method: 'PATCH',
+        body: JSON.stringify({ category_name: catName }),
+      });
+      await refresh();
+    } catch (err) {
+      console.error('Failed to save category', err);
+    }
   };
 
+  const householdAccounts = accounts.filter((acc) => acc.include_in_household !== false);
+  const totalBalance = householdAccounts.reduce((sum, acc) => sum + acc.current_balance, 0);
+  const monthlyIncome = balanceSheet.total_income;
+  const monthlySavings = Math.max(0, balanceSheet.net_cashflow);
+
   return (
-    <div className="min-h-screen bg-[#F9F7F2] text-[#1A150E] flex flex-col font-sans relative">
-      
-      {/* Background ambient lighting */}
-      <div className="ambient-glow-gold top-0 left-1/4" />
+    <div className="min-h-screen bg-[#F6F4EF] text-[#1A1714] flex flex-col font-sans">
+      <div className="sticky top-0 z-40 bg-[#F6F4EF]/90 backdrop-blur-md border-b border-[#E5DFD4]">
+        <div className="page-shell">
+          <Header
+            onSyncBank={handleSyncBank}
+            onOpenNewTx={() => setActiveTab('transactions')}
+            onOpenNewKpi={() => setActiveTab('kpis')}
+            onOpenSettings={() => setActiveTab('settings')}
+            settingsActive={activeTab === 'settings'}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            isSyncing={isSyncing}
+          />
 
-      {/* Header */}
-      <Header
-        onSyncBank={handleSyncBank}
-        onOpenNewTx={() => setActiveTab('transactions')}
-        onOpenNewKpi={() => setActiveTab('kpis')}
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        isSyncing={isSyncing}
-      />
-
-      {/* Navigation Tabs */}
-      <nav className="max-w-7xl mx-auto w-full px-6 pt-6">
-        <div className="flex flex-wrap items-center gap-1.5 p-1.5 cream-panel w-fit border border-[#E5DEC9]">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider transition ${
-              activeTab === 'overview'
-                ? 'bg-[#1A150E] text-[#F4E5C2] border border-[#C5A059]'
-                : 'bg-[#F7F3EB] text-[#594E3F] hover:bg-[#EFEADF] hover:text-[#1A150E] border border-[#E5DEC9]'
-            }`}
-          >
-            Overview & Balance
-          </button>
-
-          <button
-            onClick={() => setActiveTab('simulator')}
-            className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider transition ${
-              activeTab === 'simulator'
-                ? 'bg-[#1A150E] text-[#F4E5C2] border border-[#C5A059]'
-                : 'bg-[#F7F3EB] text-[#594E3F] hover:bg-[#EFEADF] hover:text-[#1A150E] border border-[#E5DEC9]'
-            }`}
-          >
-            ⚜️ Savings Growth Simulator
-          </button>
-
-          <button
-            onClick={() => setActiveTab('kpis')}
-            className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider transition ${
-              activeTab === 'kpis'
-                ? 'bg-[#1A150E] text-[#F4E5C2] border border-[#C5A059]'
-                : 'bg-[#F7F3EB] text-[#594E3F] hover:bg-[#EFEADF] hover:text-[#1A150E] border border-[#E5DEC9]'
-            }`}
-          >
-            📊 Custom KPI Studio
-          </button>
-
-          <button
-            onClick={() => setActiveTab('banking')}
-            className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider transition ${
-              activeTab === 'banking'
-                ? 'bg-[#1A150E] text-[#F4E5C2] border border-[#C5A059]'
-                : 'bg-[#F7F3EB] text-[#594E3F] hover:bg-[#EFEADF] hover:text-[#1A150E] border border-[#E5DEC9]'
-            }`}
-          >
-            🏦 FinTS Bank Hub
-          </button>
-
-          <button
-            onClick={() => setActiveTab('transactions')}
-            className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider transition ${
-              activeTab === 'transactions'
-                ? 'bg-[#1A150E] text-[#F4E5C2] border border-[#C5A059]'
-                : 'bg-[#F7F3EB] text-[#594E3F] hover:bg-[#EFEADF] hover:text-[#1A150E] border border-[#E5DEC9]'
-            }`}
-          >
-            💸 Transactions Feed
-          </button>
+          <nav className="nav-scroll flex items-center gap-7">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`nav-tab ${activeTab === tab.id ? 'nav-tab-active' : ''}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
         </div>
-      </nav>
+      </div>
 
-      {/* Main Content Area */}
-      <main className="max-w-7xl mx-auto w-full px-6 py-6 flex-1">
-        
-        {/* Top Metric Cards */}
-        <MetricCards
-          kpis={kpis}
-          totalIncome={MOCK_BALANCE_SHEET.total_income}
-          totalExpense={MOCK_BALANCE_SHEET.total_expense}
-          netCashflow={MOCK_BALANCE_SHEET.net_cashflow}
-        />
+      <main className="page-shell py-8 flex-1">
+        {activeTab !== 'chat' && activeTab !== 'settings' && (
+          <MetricCards
+            totalIncome={balanceSheet.total_income}
+            totalExpense={balanceSheet.total_expense}
+            netCashflow={balanceSheet.net_cashflow}
+            daysInPeriod={periodDays}
+          />
+        )}
 
-        {/* Tab Views */}
         {activeTab === 'overview' && (
           <>
-            <TelegramStatusCard />
-            <BalanceSheetView balanceSheet={MOCK_BALANCE_SHEET} />
-            <ProjectionSimulator />
+            <BalanceSheetView balanceSheet={balanceSheet} />
+            <ProjectionSimulator
+              currentBalance={totalBalance}
+              monthlyIncome={monthlyIncome}
+              initialMonthlySavings={monthlySavings}
+            />
           </>
         )}
 
-        {activeTab === 'simulator' && <ProjectionSimulator />}
+        {activeTab === 'settings' && (
+          <div>
+            <div className="mb-5">
+              <h2 className="text-lg font-semibold text-[#1A1714] font-heading">Settings</h2>
+              <p className="text-xs text-[#6B645A] mt-0.5">
+                Telegram digest and OpenRouter chat.
+              </p>
+            </div>
+            <TelegramStatusCard />
+          </div>
+        )}
 
-        {activeTab === 'kpis' && <KpiStudio kpis={kpis} onAddKpi={handleAddKpi} />}
+        {activeTab === 'chat' && (
+          <ChatView onDataChanged={refresh} onOpenSettings={() => setActiveTab('settings')} />
+        )}
+
+        {activeTab === 'simulator' && (
+          <ProjectionSimulator
+            currentBalance={totalBalance}
+            monthlyIncome={monthlyIncome}
+            initialMonthlySavings={monthlySavings}
+          />
+        )}
+
+        {activeTab === 'kpis' && userId && (
+          <KpiStudio userId={userId} kpis={kpis} onAddKpi={handleAddKpi} />
+        )}
 
         {activeTab === 'banking' && (
-          <BankingHub accounts={accounts} onSyncBank={handleSyncBank} isSyncing={isSyncing} />
+          <BankingHub accounts={accounts} onSyncBank={handleSyncBank} isSyncing={isSyncing} onDataChanged={refresh} />
         )}
 
         {activeTab === 'transactions' && (
           <TransactionsTable
             transactions={transactions}
+            accounts={accounts}
+            householdAccountIds={householdAccounts.map((acc) => acc.id)}
             searchQuery={searchQuery}
             onClassifyTx={handleClassifyTx}
+            onExcludeTx={handleExcludeTx}
           />
         )}
-
       </main>
 
-      {/* Footer */}
-      <footer className="border-t border-[#E5DEC9] py-6 text-center text-xs text-[#7A6E5D] bg-[#F9F7F2]">
-        <p className="font-semibold uppercase tracking-widest text-[10px] text-[#A38038]">SavingsTracker v1.0 — Minimalist Financial Intelligence & Custom KPI Engine</p>
+      <footer className="border-t border-[#E5DFD4] py-5 text-center text-[11px] text-[#8A8278]">
+        SavingsTracker
       </footer>
     </div>
   );

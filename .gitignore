@@ -32,9 +32,14 @@ htmlcov/
 .tox/
 
 # Node / Frontend
+node_modules/
 frontend/node_modules/
 frontend/dist/
 .eslintcache
+
+# Local SQLite (never commit live finance data)
+*.db
+*.db-journal
 
 # Environment & Secrets
 .env

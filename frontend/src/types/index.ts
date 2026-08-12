@@ -7,6 +7,7 @@ export interface Account {
   current_balance: number;
   bank_name?: string;
   is_active: boolean;
+  include_in_household?: boolean;
 }
 
 export interface Category {
@@ -30,6 +31,8 @@ export interface Transaction {
   counterparty: string;
   reference: string;
   is_manually_classified: boolean;
+  exclude_from_totals?: boolean;
+  category_direction?: 'income' | 'expense' | 'transfer';
 }
 
 export interface KPISnapshot {

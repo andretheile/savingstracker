@@ -1,92 +1,84 @@
 import React from 'react';
-import type { KPISnapshot } from '../types';
-import { TrendingUp, TrendingDown, PiggyBank, DollarSign, Flame, Activity } from 'lucide-react';
+import { Percent, Wallet, CalendarDays, ArrowDownRight } from 'lucide-react';
 
 interface MetricCardsProps {
-  kpis: KPISnapshot[];
   totalIncome: number;
   totalExpense: number;
   netCashflow: number;
+  daysInPeriod: number;
 }
 
+const euro = (n: number) =>
+  n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 export const MetricCards: React.FC<MetricCardsProps> = ({
-  kpis,
   totalIncome,
   totalExpense,
   netCashflow,
+  daysInPeriod,
 }) => {
-  const savingsRate = kpis.find(k => k.name === 'Savings Rate')?.value ?? 34.2;
-  const dailyBurn = kpis.find(k => k.name === 'Daily Burn Rate')?.value ?? 82.40;
+  const savingsRate = totalIncome > 0 ? (netCashflow / totalIncome) * 100 : null;
+  const dailyBurn = totalExpense / Math.max(1, daysInPeriod);
+  const expenseRatio = totalIncome > 0 ? (totalExpense / totalIncome) * 100 : null;
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-      
-      {/* Card 1: Savings Rate */}
-      <div className="cream-panel cream-panel-hover p-5 relative overflow-hidden group">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-[11px] font-semibold text-[#7A602B] tracking-widest uppercase">Savings Rate</span>
-          <div className="w-8 h-8 bg-[#F7F3EB] border border-[#E5DEC9] flex items-center justify-center text-[#A38038]">
-            <PiggyBank className="w-4 h-4" />
-          </div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="cream-panel cream-panel-hover p-5 flex flex-col min-h-[148px]">
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-[11px] font-medium text-[#8A8278] tracking-wide uppercase">Savings rate</span>
+          <Percent className="w-4 h-4 text-[#8F7848]" strokeWidth={1.6} />
         </div>
-        <div className="flex items-baseline gap-2 mb-1">
-          <span className="text-3xl font-extrabold text-[#1A150E] font-heading">{savingsRate.toFixed(1)}%</span>
-          <span className="text-xs font-semibold text-[#8C6D23] flex items-center gap-0.5">
-            <TrendingUp className="w-3.5 h-3.5 text-[#A38038]" /> +2.4pp
+        <span className={`text-[28px] font-semibold font-heading tracking-tight leading-none ${
+          savingsRate == null ? 'text-[#8A8278]' : savingsRate < 0 ? 'text-[#8C4A3A]' : 'text-[#1A1714]'
+        }`}>
+          {savingsRate == null ? '—' : `${savingsRate.toFixed(1)}%`}
+        </span>
+        <p className="text-[11px] text-[#8A8278] mt-auto pt-3">
+          {totalIncome > 0
+            ? 'Of counted household income'
+            : 'No counted household income this month'}
+        </p>
+      </div>
+
+      <div className="cream-panel cream-panel-hover p-5 flex flex-col min-h-[148px]">
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-[11px] font-medium text-[#8A8278] tracking-wide uppercase">Net saved</span>
+          <Wallet className="w-4 h-4 text-[#8F7848]" strokeWidth={1.6} />
+        </div>
+        <span className={`text-[28px] font-semibold font-heading tracking-tight leading-none ${
+          netCashflow < 0 ? 'text-[#8C4A3A]' : 'text-[#1A1714]'
+        }`}>
+          €{euro(netCashflow)}
+        </span>
+        <p className="text-[11px] text-[#8A8278] mt-auto pt-3">Income €{euro(totalIncome)} − Expense €{euro(totalExpense)}</p>
+      </div>
+
+      <div className="cream-panel cream-panel-hover p-5 flex flex-col min-h-[148px]">
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-[11px] font-medium text-[#8A8278] tracking-wide uppercase">Daily spend</span>
+          <CalendarDays className="w-4 h-4 text-[#8F7848]" strokeWidth={1.6} />
+        </div>
+        <span className="text-[28px] font-semibold text-[#1A1714] font-heading tracking-tight leading-none">
+          €{dailyBurn.toFixed(2)}
+        </span>
+        <p className="text-[11px] text-[#8A8278] mt-auto pt-3">Average per day this month</p>
+      </div>
+
+      <div className="cream-panel cream-panel-hover p-5 flex flex-col min-h-[148px]">
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-[11px] font-medium text-[#8A8278] tracking-wide uppercase">Expenses</span>
+          <ArrowDownRight className="w-4 h-4 text-[#8F7848]" strokeWidth={1.6} />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[28px] font-semibold text-[#1A1714] font-heading tracking-tight leading-none">
+            €{euro(totalExpense)}
           </span>
+          {expenseRatio != null && (
+            <span className="text-xs font-medium text-[#6B645A]">{expenseRatio.toFixed(1)}% of income</span>
+          )}
         </div>
-        <p className="text-[11px] text-[#6E604D]">Net saved vs monthly income</p>
+        <p className="text-[11px] text-[#8A8278] mt-auto pt-3">This calendar month</p>
       </div>
-
-      {/* Card 2: Net Cashflow */}
-      <div className="cream-panel cream-panel-hover p-5 relative overflow-hidden group">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-[11px] font-semibold text-[#7A602B] tracking-widest uppercase">Net Saved</span>
-          <div className="w-8 h-8 bg-[#F7F3EB] border border-[#E5DEC9] flex items-center justify-center text-[#A38038]">
-            <DollarSign className="w-4 h-4" />
-          </div>
-        </div>
-        <div className="flex items-baseline gap-2 mb-1">
-          <span className="text-3xl font-extrabold text-[#1A150E] font-heading">€{netCashflow.toLocaleString('de-DE', { minimumFractionDigits: 2 })}</span>
-          <span className="text-xs font-semibold text-[#8C6D23] flex items-center gap-0.5">
-            <TrendingUp className="w-3.5 h-3.5 text-[#A38038]" /> +€145
-          </span>
-        </div>
-        <p className="text-[11px] text-[#6E604D]">Income €{totalIncome.toLocaleString()} − Expense €{totalExpense.toLocaleString()}</p>
-      </div>
-
-      {/* Card 3: Daily Burn Rate */}
-      <div className="cream-panel cream-panel-hover p-5 relative overflow-hidden group">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-[11px] font-semibold text-[#7A602B] tracking-widest uppercase">Daily Burn Rate</span>
-          <div className="w-8 h-8 bg-[#F7F3EB] border border-[#E5DEC9] flex items-center justify-center text-[#A38038]">
-            <Flame className="w-4 h-4" />
-          </div>
-        </div>
-        <div className="flex items-baseline gap-2 mb-1">
-          <span className="text-3xl font-extrabold text-[#1A150E] font-heading">€{dailyBurn.toFixed(2)}</span>
-          <span className="text-xs font-semibold text-[#8C6D23] flex items-center gap-0.5">
-            <TrendingDown className="w-3.5 h-3.5 text-[#A38038]" /> -€4.10/day
-          </span>
-        </div>
-        <p className="text-[11px] text-[#6E604D]">Average spending per day</p>
-      </div>
-
-      {/* Card 4: Total Expenses */}
-      <div className="cream-panel cream-panel-hover p-5 relative overflow-hidden group">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-[11px] font-semibold text-[#7A602B] tracking-widest uppercase">Total Expenses</span>
-          <div className="w-8 h-8 bg-[#F7F3EB] border border-[#E5DEC9] flex items-center justify-center text-[#A38038]">
-            <Activity className="w-4 h-4" />
-          </div>
-        </div>
-        <div className="flex items-baseline gap-2 mb-1">
-          <span className="text-3xl font-extrabold text-[#1A150E] font-heading">€{totalExpense.toLocaleString('de-DE', { minimumFractionDigits: 2 })}</span>
-          <span className="text-xs font-semibold text-[#594E3F]">65.8% of income</span>
-        </div>
-        <p className="text-[11px] text-[#6E604D]">Categorized across 6 areas</p>
-      </div>
-
     </div>
   );
 };

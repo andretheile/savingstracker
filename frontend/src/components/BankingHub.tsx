@@ -2,7 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import type { Account } from '../types';
 import { Building2, Shield, CheckCircle2, Lock, Plus, Smartphone, AlertCircle, Loader2, RefreshCw } from 'lucide-react';
 
-const API_BASE = '/api';
+const getApiBase = () => {
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost' && window.location.port !== '8000') {
+    return 'http://localhost:8000/api';
+  }
+  return '/api';
+};
 
 interface BankingHubProps {
   accounts: Account[];
@@ -41,7 +46,7 @@ export const BankingHub: React.FC<BankingHubProps> = () => {
   const fetchAccounts = useCallback(async () => {
     setIsLoadingAccounts(true);
     try {
-      const resp = await fetch(`${API_BASE}/banking/accounts`);
+      const resp = await fetch(`${getApiBase()}/banking/accounts`);
       if (resp.ok) {
         const data = await resp.json();
         setBankAccounts(data);
@@ -63,7 +68,7 @@ export const BankingHub: React.FC<BankingHubProps> = () => {
     setErrorMsg('');
 
     try {
-      const resp = await fetch(`${API_BASE}/banking/connect`, {
+      const resp = await fetch(`${getApiBase()}/banking/connect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -108,7 +113,7 @@ export const BankingHub: React.FC<BankingHubProps> = () => {
     setErrorMsg('');
 
     try {
-      const resp = await fetch(`${API_BASE}/banking/tan`, {
+      const resp = await fetch(`${getApiBase()}/banking/tan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

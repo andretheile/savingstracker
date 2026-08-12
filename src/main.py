@@ -71,11 +71,21 @@ async def lifespan(app: FastAPI):
     logger.info("Shutdown complete.")
 
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(
     title="SavingsTracker API & Web Dashboard",
     description="Modular personal finance backend with custom KPIs, bank connections, projections, and web dashboard.",
     version="1.0.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Register REST API routers under /api prefix

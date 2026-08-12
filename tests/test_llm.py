@@ -403,7 +403,7 @@ async def test_set_llm_config_validates_and_persists(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_web_llm_chat_endpoint(client: AsyncClient):
+async def test_web_llm_chat_endpoint(client: AsyncClient, async_session: AsyncSession):
     from src.config import settings
 
     old_key = settings.openrouter_api_key
@@ -435,7 +435,14 @@ async def test_web_llm_chat_endpoint(client: AsyncClient):
             }
             yield {"type": "reply", "content": "Household net is 200."}
 
-        with patch("src.llm.router.iter_agent_events", side_effect=fake_events):
+        @asynccontextmanager
+        async def mock_standalone():
+            yield async_session
+
+        with (
+            patch("src.llm.router.iter_agent_events", side_effect=fake_events),
+            patch("src.llm.router.get_standalone_session", side_effect=mock_standalone),
+        ):
             ok = await client.post("/api/llm/chat", json={"message": "How is cashflow?"})
             assert ok.status_code == 200
             body = ok.text

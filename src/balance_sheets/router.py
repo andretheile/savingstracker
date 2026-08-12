@@ -1,9 +1,8 @@
 """FastAPI router for Balance Sheets."""
 
+import uuid
 from datetime import date
 from decimal import Decimal
-from typing import Dict, List
-import uuid
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -28,9 +27,9 @@ class BalanceSheetResponse(BaseModel):
     total_expense: Decimal
     net_cashflow: Decimal
     savings_rate_pct: Decimal
-    income_items: List[LineItemResponse]
-    expense_items: List[LineItemResponse]
-    account_balances: Dict[str, Decimal]
+    income_items: list[LineItemResponse]
+    expense_items: list[LineItemResponse]
+    account_balances: dict[str, Decimal]
 
 
 @router.get("/{user_id}", response_model=BalanceSheetResponse)

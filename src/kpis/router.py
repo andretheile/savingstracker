@@ -1,18 +1,16 @@
 """FastAPI router for KPI management and evaluation."""
 
+import uuid
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional
-import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.dependencies import get_db
 from src.kpis.engine import kpi_engine
-from src.kpis.models import KPIDefinition, KPISnapshot
+from src.kpis.models import KPIDefinition
 from src.kpis.service import evaluate_and_save_kpis_for_user
 
 router = APIRouter(prefix="/kpis", tags=["kpis"])
@@ -33,8 +31,8 @@ class KPIValidateRequest(BaseModel):
 
 class KPIValidateResponse(BaseModel):
     is_valid: bool
-    variables: List[str]
-    errors: List[str]
+    variables: list[str]
+    errors: list[str]
 
 
 class KPISnapshotResponse(BaseModel):
@@ -86,7 +84,42 @@ async def create_custom_kpi(
     return {"id": kpi.id, "name": kpi.name, "formula": kpi.formula}
 
 
-@router.post("/evaluate/{user_id}", response_model=List[KPISnapshotResponse])
+class KPIDashboardItem(BaseModel):
+    id: str
+    kpi_id: str
+    name: str
+    formula: str
+    unit: str
+    value: float
+    description: str = ""
+
+
+@router.get("/{user_id}", response_model=list[KPIDashboardItem])
+async def list_kpis_for_user(
+    user_id: uuid.UUID,
+    period_start: date,
+    period_end: date,
+    db: AsyncSession = Depends(get_db),
+):
+    snapshots = await evaluate_and_save_kpis_for_user(db, user_id, period_start, period_end)
+    items = []
+    for snap in snapshots:
+        definition = snap.kpi_definition
+        items.append(
+            KPIDashboardItem(
+                id=str(snap.id),
+                kpi_id=str(snap.kpi_id),
+                name=definition.name if definition else "KPI",
+                formula=definition.formula if definition else "",
+                unit=definition.unit if definition else "",
+                value=float(snap.value),
+                description=definition.description if definition else "",
+            )
+        )
+    return items
+
+
+@router.post("/evaluate/{user_id}", response_model=list[KPISnapshotResponse])
 async def evaluate_kpis(
     user_id: uuid.UUID,
     period_start: date,

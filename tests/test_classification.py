@@ -1,7 +1,7 @@
 """Unit tests for Classification rule matching operators."""
 
-from decimal import Decimal
 import uuid
+from decimal import Decimal
 
 # Ensure all SQLAlchemy models are registered
 import src.accounts.models  # noqa
@@ -11,7 +11,6 @@ import src.kpis.models  # noqa
 import src.projections.models  # noqa
 import src.transactions.models  # noqa
 import src.users.models  # noqa
-
 from src.classification.models import ClassificationRule
 from src.classification.service import _matches
 from src.transactions.models import Transaction

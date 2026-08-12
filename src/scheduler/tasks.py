@@ -2,8 +2,8 @@
 
 import asyncio
 import logging
-from datetime import date, datetime, timezone
 import uuid
+from datetime import UTC, date, datetime
 
 from telegram import Bot
 
@@ -55,7 +55,7 @@ def generate_user_monthly_report(self, user_id_str: str):
                 user_id=user_id,
                 report_month=first_day_prev_month,
                 report_data=payload,
-                computed_at=datetime.now(timezone.utc),
+                computed_at=datetime.now(UTC),
             )
             session.add(report)
 
@@ -72,7 +72,7 @@ def generate_user_monthly_report(self, user_id_str: str):
                         parse_mode="Markdown",
                     )
                     report.sent_via_telegram = True
-                    report.sent_at = datetime.now(timezone.utc)
+                    report.sent_at = datetime.now(UTC)
                     logger.info("Sent monthly report to Telegram user %d", user.telegram_id)
                 except Exception as e:
                     logger.error("Failed to send Telegram message to user %d: %s", user.telegram_id, e)
@@ -89,10 +89,12 @@ def check_stale_connections():
 
     async def _run():
         from datetime import timedelta
-        from sqlalchemy import select, or_
+
+        from sqlalchemy import or_, select
+
         from src.banking.models import BankConnection
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        cutoff = datetime.now(UTC) - timedelta(days=30)
         async with get_standalone_session() as session:
             stmt = select(BankConnection).where(
                 BankConnection.is_active.is_(True),

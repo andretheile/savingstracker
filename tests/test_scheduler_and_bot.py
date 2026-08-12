@@ -1,22 +1,20 @@
 """Unit tests for monthly report generator, demo seed script, and Celery tasks."""
 
-import pytest
-import uuid
 from datetime import date
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from src.core.base_model import Base
-import src.users.models  # noqa
 import src.accounts.models  # noqa
 import src.banking.models  # noqa
-import src.transactions.models  # noqa
 import src.classification.models  # noqa
 import src.kpis.models  # noqa
 import src.projections.models  # noqa
 import src.scheduler.models  # noqa
-
+import src.transactions.models  # noqa
+import src.users.models  # noqa
+from src.core.base_model import Base
 from src.scheduler.monthly_report import build_monthly_report_payload
 from src.seed import run_seed
 from src.telegram_bot.bot import create_telegram_bot

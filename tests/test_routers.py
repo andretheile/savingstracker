@@ -1,20 +1,19 @@
 """Integration tests for FastAPI REST API endpoints."""
 
-import pytest
 import uuid
-from datetime import date
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-from src.core.base_model import Base
-import src.users.models  # noqa
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 import src.accounts.models  # noqa
 import src.banking.models  # noqa
-import src.transactions.models  # noqa
 import src.classification.models  # noqa
 import src.kpis.models  # noqa
 import src.projections.models  # noqa
-
+import src.transactions.models  # noqa
+import src.users.models  # noqa
+from src.core.base_model import Base
 from src.core.dependencies import get_db
 from src.main import app
 
@@ -47,6 +46,15 @@ async def test_health_check(client: AsyncClient):
     res = await client.get("/api/health")
     assert res.status_code == 200
     assert res.json() == {"status": "healthy", "service": "savingstracker"}
+
+
+@pytest.mark.asyncio
+async def test_telegram_status_unlinked(client: AsyncClient):
+    res = await client.get("/api/telegram/status")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["connected"] is False
+    assert "next_digest" in data
 
 
 @pytest.mark.asyncio

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date
 
 from sqlalchemy import Boolean, Date, ForeignKey, Index, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -52,6 +52,9 @@ class Transaction(UUIDMixin, TimestampMixin, Base):
     )
 
     is_manually_classified: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    exclude_from_totals: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )
 

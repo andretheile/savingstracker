@@ -25,6 +25,9 @@ class Account(UUIDMixin, TimestampMixin, Base):
         Numeric(precision=12, scale=2), nullable=False, default=0
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    include_in_household: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
 
     # Relationships
     user = relationship("User", back_populates="accounts")

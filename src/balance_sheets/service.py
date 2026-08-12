@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from dateutil.relativedelta import relativedelta
 from datetime import date
 from decimal import Decimal
 
@@ -13,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.accounts.service import get_account_balance, list_user_accounts
 from src.classification.models import Category
+from src.classification.service import is_cashflow_relevant
 from src.transactions.models import Transaction
 
 
@@ -44,9 +44,10 @@ async def generate_balance_sheet(
 ) -> BalanceSheet:
     """Generate a full balance sheet statement for a user across a specified date range."""
     # 1. Accounts & current running balances
-    accounts = await list_user_accounts(session, user_id)
+    accounts = await list_user_accounts(session, user_id, household_only=True)
     account_balances: dict[str, Decimal] = {}
     account_ids = [acc.id for acc in accounts]
+    household_ibans = {(acc.iban or "").replace(" ", "").upper() for acc in accounts if acc.iban}
 
     for acc in accounts:
         account_balances[acc.name] = await get_account_balance(session, acc.id)
@@ -74,14 +75,17 @@ async def generate_balance_sheet(
     total_exp = Decimal("0.00")
 
     for tx, cat in rows:
+        if not is_cashflow_relevant(tx, cat, household_ibans):
+            continue
         amt = Decimal(str(tx.amount))
         cat_name = cat.name if cat else "Uncategorized"
         cat_icon = cat.icon if cat else "❓"
 
         if amt > 0:
             total_inc += amt
-            prev = income_map.get(cat_name, (cat_icon, Decimal("0.00")))[1]
-            income_map[cat_name] = (cat_icon, prev + amt)
+            display_name = "From personal accounts" if cat_name == "Internal Transfer" else cat_name
+            prev = income_map.get(display_name, (cat_icon, Decimal("0.00")))[1]
+            income_map[display_name] = (cat_icon, prev + amt)
         else:
             abs_amt = abs(amt)
             total_exp += abs_amt

@@ -36,6 +36,6 @@ def decrypt_field(ciphertext: str) -> str:
     """Decrypt a ciphertext string back to plaintext."""
     try:
         return _get_fernet().decrypt(ciphertext.encode()).decode()
-    except InvalidToken:
+    except InvalidToken as err:
         logger.error("Failed to decrypt field — invalid token or corrupted data")
-        raise ValueError("Decryption failed. The encryption key may have changed.")
+        raise ValueError("Decryption failed. The encryption key may have changed.") from err

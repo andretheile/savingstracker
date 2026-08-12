@@ -1,26 +1,25 @@
 """Integration tests for service layer operations."""
 
 from datetime import date
-from decimal import Decimal
-import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-from src.core.base_model import Base
-import src.users.models  # noqa
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 import src.accounts.models  # noqa
 import src.banking.models  # noqa
-import src.transactions.models  # noqa
 import src.classification.models  # noqa
 import src.kpis.models  # noqa
 import src.projections.models  # noqa
-
-from src.users.service import get_or_create_user_by_telegram_id, get_user_by_id, list_active_users
+import src.transactions.models  # noqa
+import src.users.models  # noqa
 from src.accounts.service import create_account, get_account_balance, list_user_accounts
-from src.transactions.service import add_transaction, list_transactions
+from src.balance_sheets.service import generate_balance_sheet
 from src.classification.service import seed_default_categories
+from src.core.base_model import Base
 from src.kpis.service import evaluate_and_save_kpis_for_user
 from src.projections.service import generate_user_projection
-from src.balance_sheets.service import generate_balance_sheet
+from src.transactions.service import add_transaction, list_transactions
+from src.users.service import get_or_create_user_by_telegram_id, get_user_by_id, list_active_users
 
 
 @pytest.fixture

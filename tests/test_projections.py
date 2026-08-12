@@ -1,6 +1,7 @@
 """Unit tests for Savings Projection Engine compound interest math and scenarios."""
 
 import pytest
+
 from src.projections.engine import compute_full_projection, project_future_value
 
 

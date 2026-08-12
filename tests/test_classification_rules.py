@@ -1,23 +1,24 @@
 """Unit tests for classification rule engine and default category seeding."""
 
-import pytest
 import uuid
 from datetime import date
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-from src.core.base_model import Base
-import src.users.models  # noqa
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 import src.accounts.models  # noqa
-import src.transactions.models  # noqa
+import src.banking.models  # noqa
 import src.classification.models  # noqa
-
-from src.classification.models import Category, ClassificationRule
+import src.transactions.models  # noqa
+import src.users.models  # noqa
+from src.classification.models import ClassificationRule
 from src.classification.service import (
-    classify_transaction,
-    classify_batch,
-    seed_default_categories,
     _matches,
+    classify_batch,
+    classify_transaction,
+    seed_default_categories,
 )
+from src.core.base_model import Base
 from src.transactions.models import Transaction
 
 
@@ -136,3 +137,105 @@ async def test_classify_and_batch(async_session: AsyncSession):
     assert cnt1 > 0
     cnt2 = await seed_default_categories(async_session)
     assert cnt2 == 0
+
+
+def test_extract_ibans_and_internal_transfer():
+    from src.classification.service import extract_ibans, is_internal_transfer
+
+    assert extract_ibans("DE36120300001085715538Andre Theile") == {"DE36120300001085715538"}
+    tx = Transaction(
+        account_id=uuid.uuid4(),
+        transaction_date=date.today(),
+        amount=-496.0,
+        description="Kreditkarte Dänemark",
+        counterparty="DE36120300001205941121Andre Theile und Judith Theile",
+    )
+    own = {"DE36120300001085715538", "DE36120300001205941121"}
+    assert is_internal_transfer(tx, own, "DE36120300001085715538") is True
+    assert is_internal_transfer(tx, own, "DE36120300001205941121") is False
+
+    car = Transaction(
+        account_id=uuid.uuid4(),
+        transaction_date=date.today(),
+        amount=-7400.0,
+        description="Auto",
+        counterparty="DE11200411110173793100Andre Theile",
+    )
+    names = {"andre theile"}
+    assert is_internal_transfer(car, own, "DE36120300001085715538", names) is True
+
+
+@pytest.mark.asyncio
+async def test_builtin_rules_transfers_and_exclude(async_session: AsyncSession):
+    from src.accounts.service import create_account
+    from src.balance_sheets.service import generate_balance_sheet
+    from src.transactions.service import add_transaction
+    from src.users.service import get_or_create_user_by_telegram_id
+
+    user = await get_or_create_user_by_telegram_id(async_session, 424242, "Andre")
+    await seed_default_categories(async_session)
+    giro = await create_account(
+        async_session, user.id, "Giro", iban="DE36120300001085715538"
+    )
+    joint = await create_account(
+        async_session, user.id, "Joint", iban="DE36120300001205941121"
+    )
+
+    transfer = await add_transaction(
+        async_session,
+        user_id=user.id,
+        account_id=giro.id,
+        tx_date=date(2026, 8, 6),
+        amount=-496.0,
+        description="Kreditkarte Dänemark",
+        counterparty="DE36120300001205941121Andre Theile",
+    )
+    grocery = await add_transaction(
+        async_session,
+        user_id=user.id,
+        account_id=joint.id,
+        tx_date=date(2026, 8, 10),
+        amount=-18.26,
+        description="VISA Debitkartenumsatz",
+        counterparty="DE96120300009005290904REWE.Rainer.Czerlinski/Stuttgart",
+    )
+    car = await add_transaction(
+        async_session,
+        user_id=user.id,
+        account_id=giro.id,
+        tx_date=date(2026, 8, 7),
+        amount=-7400.0,
+        description="Auto",
+        counterparty="DE11200411110173793100Andre Theile",
+    )
+    car.exclude_from_totals = True
+    await async_session.flush()
+
+    assert transfer.exclude_from_totals is False
+    assert grocery.category_id is not None
+    assert car.exclude_from_totals is True
+
+    bs = await generate_balance_sheet(
+        async_session, user.id, date(2026, 8, 1), date(2026, 8, 31)
+    )
+    assert float(bs.total_expense) == pytest.approx(18.26)
+    assert float(bs.total_income) == 0.0
+
+    giro.include_in_household = False
+    await async_session.flush()
+    funded = await add_transaction(
+        async_session,
+        user_id=user.id,
+        account_id=joint.id,
+        tx_date=date(2026, 8, 8),
+        amount=3600.0,
+        description="Urlaubsgeld + Miete + Leben",
+        counterparty="DE36120300001085715538Andre Theile",
+    )
+    assert funded.category_id == transfer.category_id
+    bs_hh = await generate_balance_sheet(
+        async_session, user.id, date(2026, 8, 1), date(2026, 8, 31)
+    )
+    assert float(bs_hh.total_income) == pytest.approx(3600.0)
+    assert float(bs_hh.total_expense) == pytest.approx(18.26)
+

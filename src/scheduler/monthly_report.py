@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
-from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +23,7 @@ async def build_monthly_report_payload(
     """Generate complete monthly financial data and format a Telegram markdown message."""
 
     # 1. Compute KPIs
-    kpi_snapshots = await evaluate_and_save_kpis_for_user(session, user_id, period_start, period_end)
+    await evaluate_and_save_kpis_for_user(session, user_id, period_start, period_end)
 
     # 2. Generate balance sheet
     bs = await generate_balance_sheet(session, user_id, period_start, period_end)

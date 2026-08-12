@@ -1,27 +1,27 @@
 """Unit tests for Bank Connection service and FinTS adapter."""
 
-import pytest
 import uuid
 from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from cryptography.fernet import Fernet
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-
-from src.core.base_model import Base
-import src.users.models  # noqa
 import src.accounts.models  # noqa
 import src.banking.models  # noqa
 import src.transactions.models  # noqa
-
-from src.banking.adapters.base import BankAdapter, AuthResult, BankAccountInfo, RawTransaction
+import src.users.models  # noqa
+from src.banking.adapters.base import AuthResult, BankAccountInfo, RawTransaction
 from src.banking.adapters.fints_adapter import FinTSAdapter
 from src.banking.service import (
-    create_bank_connection,
-    sync_bank_connection,
     complete_tan_sync,
+    create_bank_connection,
+    import_since_date,
+    sync_bank_connection,
 )
+from src.core.base_model import Base
 from src.users.service import get_or_create_user_by_telegram_id
 
 
@@ -43,6 +43,11 @@ async def async_session():
     async with session_factory() as session:
         yield session
     await engine.dispose()
+
+
+def test_import_since_date_starts_previous_month():
+    assert import_since_date(date(2026, 8, 12)) == date(2026, 7, 1)
+    assert import_since_date(date(2026, 1, 5)) == date(2025, 12, 1)
 
 
 @pytest.mark.asyncio
@@ -127,20 +132,77 @@ async def test_fints_adapter_full():
     stmt_mock.data.purpose = "Coffee"
     stmt_mock.data.applicant_name = "Starbucks"
     stmt_mock.data.bank_reference = "Ref 12"
-    client_mock.get_statement.return_value = [stmt_mock]
+    client_mock.get_tan_mechanisms.return_value = {}
+    client_mock.get_transactions.return_value = [stmt_mock]
 
     with patch("fints.client.FinTS3PinTanClient", return_value=client_mock):
         auth_res = await adapter.connect("12345678", "http://fints", "user", "pin")
         assert auth_res.success is True
+        client_mock.fetch_tan_mechanisms.assert_called()
+        client_mock.__enter__.assert_called()
 
         accounts = await adapter.fetch_accounts({"client": client_mock})
         assert len(accounts) == 1
         assert accounts[0].iban == "DE999"
+        client_mock.get_balance.assert_called()
 
         txs = await adapter.fetch_transactions({"client": client_mock}, "DE999", date.today())
         assert len(txs) == 1
         assert txs[0].amount == Decimal("50.00")
+        client_mock.get_transactions.assert_called()
+
+        # MT940 objects store fields on .data as a dict
+        class Mt940Tx:
+            def __init__(self):
+                self.data = {
+                    "date": date.today(),
+                    "amount": Decimal("-850.00"),
+                    "purpose": "Miete",
+                    "applicant_name": "Vermieter GmbH",
+                }
+
+        parsed = adapter._parse_transaction(Mt940Tx(), date.today())
+        assert parsed is not None
+        assert parsed.amount == Decimal("-850.00")
+        assert parsed.description == "Miete"
 
         # Handle TAN
         tan_res = await adapter.handle_tan({"client": client_mock, "tan_response": "resp"}, "123456")
         assert tan_res.success is True
+
+
+def test_resolve_url_rewrites_legacy_dkb():
+    adapter = FinTSAdapter()
+    assert adapter._resolve_url("12030000", "") == "https://fints.dkb.de/fints"
+    assert adapter._resolve_url("12030000", "https://fints.banking-dkb.de/fints/") == "https://fints.dkb.de/fints"
+    assert adapter._resolve_url(
+        "12030000", "https://banking-dkb.s-fints-pt-dkb.de/fints30"
+    ) == "https://fints.dkb.de/fints"
+    assert adapter._resolve_url("10070024", "") == "https://fints.deutsche-bank.de/fints"
+
+
+def test_select_tan_mechanism_prefers_dkb_app():
+    adapter = FinTSAdapter()
+    tan2go = MagicMock()
+    tan2go.name = "TAN2Go"
+    dkb_app = MagicMock()
+    dkb_app.name = "DKB App"
+    assert adapter._select_tan_mechanism({"921": tan2go, "940": dkb_app}) == "940"
+
+
+def test_submit_tan_polls_decoupled_until_confirmed():
+    adapter = FinTSAdapter()
+    client = MagicMock()
+
+    class FakeNeedTAN:
+        pass
+
+    pending = FakeNeedTAN()
+    client.send_tan.side_effect = [pending, pending, "ok"]
+
+    with patch("fints.client.NeedTANResponse", FakeNeedTAN), \
+         patch("src.banking.adapters.fints_adapter.time.sleep"):
+        adapter._submit_tan(client, pending, "", True)
+
+    assert client.send_tan.call_count == 3
+    client.send_tan.assert_called_with(pending, "")

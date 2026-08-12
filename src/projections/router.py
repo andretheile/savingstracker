@@ -1,17 +1,15 @@
 """FastAPI router for Savings Projections."""
 
+import uuid
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional
-import uuid
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.dependencies import get_db
 from src.projections.service import generate_user_projection, get_or_create_user_projection_config
-
 
 router = APIRouter(prefix="/projections", tags=["projections"])
 
@@ -34,15 +32,15 @@ class ProjectionResponse(BaseModel):
     projected_real: Decimal
     total_contributed: Decimal
     total_growth: Decimal
-    scenarios: List[ScenarioResponse]
+    scenarios: list[ScenarioResponse]
 
 
 class ProjectionConfigUpdate(BaseModel):
-    annual_return_pct: Optional[float] = None
-    inflation_pct: Optional[float] = None
-    horizon_years: Optional[int] = None
-    monthly_contribution: Optional[float] = None
-    use_actual_savings: Optional[bool] = None
+    annual_return_pct: float | None = None
+    inflation_pct: float | None = None
+    horizon_years: int | None = None
+    monthly_contribution: float | None = None
+    use_actual_savings: bool | None = None
 
 
 class ProjectionConfigResponse(BaseModel):
@@ -89,6 +87,14 @@ async def compute_projection(
         total_growth=proj_data.baseline.total_growth,
         scenarios=scenarios,
     )
+
+
+@router.get("/config/{user_id}", response_model=ProjectionConfigResponse)
+async def get_projection_config(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_or_create_user_projection_config(db, user_id)
 
 
 @router.put("/config/{user_id}", response_model=ProjectionConfigResponse)

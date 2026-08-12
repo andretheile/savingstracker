@@ -4,20 +4,24 @@ from __future__ import annotations
 
 import logging
 import uuid
+from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.banking.adapters.fints_adapter import FinTSAdapter
-from src.banking.models import BankConnection
-from src.banking.service import create_bank_connection
-from src.core.dependencies import get_db
-from src.core.security import encrypt_field
 from src.accounts.models import Account
 from src.accounts.service import create_account, get_account_balance
+from src.banking.adapters.fints_adapter import FinTSAdapter
+from src.banking.models import BankConnection
+from src.banking.service import import_since_date
+from src.classification.service import reclassify_user_transactions
+from src.core.dependencies import get_db
+from src.core.security import encrypt_field
+from src.transactions.models import Transaction
+from src.transactions.service import add_transaction
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/banking", tags=["banking"])
@@ -38,7 +42,7 @@ class BankConnectRequest(BaseModel):
 
 class TanSubmitRequest(BaseModel):
     session_id: str
-    tan: str
+    tan: str = ""
 
 
 class BankConnectionResponse(BaseModel):
@@ -70,6 +74,7 @@ class AccountSyncResponse(BaseModel):
     iban: str | None
     currency: str
     current_balance: float
+    include_in_household: bool = True
 
 
 # ── Endpoints ────────────────────────────────────────────
@@ -179,6 +184,7 @@ async def api_list_bank_accounts(
             iban=acc.iban,
             currency=acc.currency,
             current_balance=float(bal),
+            include_in_household=bool(acc.include_in_household),
         ))
     return response
 
@@ -248,27 +254,67 @@ async def _fetch_and_store_accounts(
         await db.flush()
 
         count = 0
+        since = import_since_date()
+        logger.info("Importing transactions since %s", since)
         for b_acc in bank_accounts:
-            # Check if account already exists by IBAN
+            acc = None
             if b_acc.iban:
                 existing_stmt = select(Account).where(Account.iban == b_acc.iban)
                 existing_result = await db.execute(existing_stmt)
-                existing = existing_result.scalar_one_or_none()
-                if existing:
-                    logger.info("Account %s already exists, skipping", b_acc.iban)
-                    count += 1
-                    continue
+                acc = existing_result.scalar_one_or_none()
 
-            acc = await create_account(
-                session=db,
-                user_id=user.id,
-                name=f"{session['bank_name']} ({b_acc.iban[-4:] if b_acc.iban else 'N/A'})",
-                iban=b_acc.iban,
-                currency=b_acc.currency,
-            )
+            if acc is None:
+                acc = await create_account(
+                    session=db,
+                    user_id=user.id,
+                    name=f"{session['bank_name']} ({b_acc.iban[-4:] if b_acc.iban else 'N/A'})",
+                    iban=b_acc.iban,
+                    currency=b_acc.currency,
+                    initial_balance=float(b_acc.balance) if b_acc.balance is not None else 0.0,
+                )
+                logger.info("Created account: %s (%s)", acc.name, b_acc.iban)
+            else:
+                logger.info("Updating existing account %s", b_acc.iban)
+
+            if b_acc.iban:
+                raw_txs = await adapter.fetch_transactions(client_data, b_acc.iban, since)
+                imported = 0
+                for r_tx in raw_txs:
+                    try:
+                        await add_transaction(
+                            session=db,
+                            user_id=user.id,
+                            account_id=acc.id,
+                            tx_date=r_tx.transaction_date,
+                            amount=r_tx.amount,
+                            description=r_tx.description,
+                            counterparty=r_tx.counterparty,
+                            reference=r_tx.reference,
+                            bank_connection_id=conn.id,
+                            auto_classify=True,
+                        )
+                        imported += 1
+                    except ValueError:
+                        pass
+                logger.info("Imported %d new transactions for %s", imported, b_acc.iban)
+
+            if b_acc.balance is not None:
+                tx_sum_stmt = select(
+                    func.coalesce(func.sum(Transaction.amount), 0)
+                ).where(Transaction.account_id == acc.id)
+                tx_sum = (await db.execute(tx_sum_stmt)).scalar() or 0
+                acc.initial_balance = b_acc.balance - Decimal(str(tx_sum))
+                logger.info(
+                    "Set %s initial_balance=%s so ledger matches live balance %s",
+                    acc.name,
+                    acc.initial_balance,
+                    b_acc.balance,
+                )
+
             count += 1
-            logger.info("Created account: %s (%s)", acc.name, b_acc.iban)
 
+        classified = await reclassify_user_transactions(db, user.id)
+        logger.info("Auto-classified %d transactions after bank import", classified)
         return count
 
     except Exception as e:

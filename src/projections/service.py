@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -52,7 +52,7 @@ async def generate_user_projection(
     config = await get_or_create_user_projection_config(session, user_id)
 
     # 1. Total current balance across all active accounts
-    accounts = await list_user_accounts(session, user_id)
+    accounts = await list_user_accounts(session, user_id, household_only=True)
     total_balance = Decimal("0.00")
     for acc in accounts:
         total_balance += await get_account_balance(session, acc.id)
@@ -99,7 +99,7 @@ async def generate_user_projection(
         projected_value_nominal=projection_data.baseline.nominal,
         projected_value_real=projection_data.baseline.real,
         scenarios=scenario_dicts,
-        computed_at=datetime.now(timezone.utc),
+        computed_at=datetime.now(UTC),
     )
     session.add(snapshot)
     await session.flush()

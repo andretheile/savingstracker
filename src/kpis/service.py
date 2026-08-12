@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
-from decimal import Decimal
-from typing import Sequence
+from collections.abc import Sequence
+from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.accounts.models import Account
 from src.classification.models import Category
+from src.classification.service import is_cashflow_relevant
 from src.kpis.builtin_kpis import BUILTIN_KPIS
-from src.kpis.engine import KPIEngine, TransactionAggregates, kpi_engine
+from src.kpis.engine import TransactionAggregates, kpi_engine
 from src.kpis.models import KPIDefinition, KPISnapshot
 from src.transactions.models import Transaction
 
@@ -45,17 +45,21 @@ async def compute_aggregates_for_period(
     period_end: date,
 ) -> TransactionAggregates:
     """Fetch transaction data for a user and construct TransactionAggregates."""
-    # Find all accounts for user
-    stmt_acc = select(Account.id).where(Account.user_id == user_id)
-    result_acc = await session.execute(stmt_acc)
-    account_ids = result_acc.scalars().all()
+    stmt_acc = select(Account).where(
+        Account.user_id == user_id,
+        Account.is_active.is_(True),
+        Account.include_in_household.is_(True),
+    )
+    household = list((await session.execute(stmt_acc)).scalars().all())
+    account_ids = [acc.id for acc in household]
+    household_ibans = {(acc.iban or "").replace(" ", "").upper() for acc in household if acc.iban}
 
     if not account_ids:
         return TransactionAggregates()
 
     # Query period transactions
     stmt_tx = (
-        select(Transaction, Category.name)
+        select(Transaction, Category)
         .outerjoin(Category, Transaction.category_id == Category.id)
         .where(
             Transaction.account_id.in_(account_ids),
@@ -68,14 +72,18 @@ async def compute_aggregates_for_period(
 
     total_income = 0.0
     total_expense = 0.0
-    tx_count = len(rows)
+    tx_count = 0
     max_expense = 0.0
     cat_totals: dict[str, float] = {}
     cat_counts: dict[str, int] = {}
 
-    for tx, cat_name in rows:
+    for tx, cat in rows:
+        if not is_cashflow_relevant(tx, cat, household_ibans):
+            continue
         amt = float(tx.amount)
+        cat_name = cat.name if cat else None
         cat_key = (cat_name or "uncategorized").lower().replace(" ", "_").replace("&", "and")
+        tx_count += 1
 
         if amt > 0:
             total_income += amt
@@ -92,21 +100,30 @@ async def compute_aggregates_for_period(
     avg_expense = (total_expense / tx_count) if tx_count > 0 else 0.0
     days_in_period = max(1, (period_end - period_start).days + 1)
 
-    # Compute previous period for MoM comparison
-    period_len = (period_end - period_start).days + 1
-    prev_start = period_start.replace(month=period_start.month - 1) if period_start.month > 1 else period_start.replace(year=period_start.year - 1, month=12)
-    prev_end = period_start.replace(day=1)
+    first_of_period = period_start.replace(day=1)
+    prev_end = first_of_period
+    prev_start = (first_of_period - timedelta(days=1)).replace(day=1)
 
-    stmt_prev = select(Transaction.amount).where(
-        Transaction.account_id.in_(account_ids),
-        Transaction.transaction_date >= prev_start,
-        Transaction.transaction_date < prev_end,
+    stmt_prev = (
+        select(Transaction, Category)
+        .outerjoin(Category, Transaction.category_id == Category.id)
+        .where(
+            Transaction.account_id.in_(account_ids),
+            Transaction.transaction_date >= prev_start,
+            Transaction.transaction_date < prev_end,
+        )
     )
     result_prev = await session.execute(stmt_prev)
-    prev_amts = result_prev.scalars().all()
-
-    prev_income = sum(float(a) for a in prev_amts if a > 0)
-    prev_expense = sum(abs(float(a)) for a in prev_amts if a < 0)
+    prev_income = 0.0
+    prev_expense = 0.0
+    for tx, cat in result_prev.all():
+        if not is_cashflow_relevant(tx, cat, household_ibans):
+            continue
+        amt = float(tx.amount)
+        if amt > 0:
+            prev_income += amt
+        else:
+            prev_expense += abs(amt)
 
     return TransactionAggregates(
         total_income=total_income,
@@ -144,7 +161,7 @@ async def evaluate_and_save_kpis_for_user(
     aggregates = await compute_aggregates_for_period(session, user_id, period_start, period_end)
 
     snapshots = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     for kpi in kpi_defs:
         res = kpi_engine.compute(kpi.formula, aggregates)

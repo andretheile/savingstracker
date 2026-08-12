@@ -19,7 +19,7 @@ dependencies = [
     # Telegram bot
     "python-telegram-bot[job-queue]>=21.5",
     # Bank connection
-    "fints>=4.1.0",
+    "fints>=5.0.0",
     # KPI engine
     "asteval>=1.0.5",
     # Config & security
@@ -50,3 +50,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B"]
+ignore = [
+    "E501",  # line length; many FastAPI signatures exceed 100
+    "B008",  # Depends() in defaults is the FastAPI pattern
+]

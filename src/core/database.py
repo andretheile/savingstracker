@@ -56,6 +56,37 @@ async def get_standalone_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
+async def ensure_schema() -> None:
+    """Add columns that create_all will not apply to an existing SQLite file."""
+    from sqlalchemy import inspect, text
+
+    async with engine.begin() as conn:
+
+        def column_names(sync_conn, table: str) -> set[str]:
+            insp = inspect(sync_conn)
+            if not insp.has_table(table):
+                return set()
+            return {c["name"] for c in insp.get_columns(table)}
+
+        cols = await conn.run_sync(lambda c: column_names(c, "transactions"))
+        if cols and "exclude_from_totals" not in cols:
+            await conn.execute(
+                text(
+                    "ALTER TABLE transactions ADD COLUMN exclude_from_totals "
+                    "BOOLEAN DEFAULT 0 NOT NULL"
+                )
+            )
+
+        acc_cols = await conn.run_sync(lambda c: column_names(c, "accounts"))
+        if acc_cols and "include_in_household" not in acc_cols:
+            await conn.execute(
+                text(
+                    "ALTER TABLE accounts ADD COLUMN include_in_household "
+                    "BOOLEAN DEFAULT 1 NOT NULL"
+                )
+            )
+
+
 async def dispose_engine() -> None:
     """Gracefully close all connections on shutdown."""
     await engine.dispose()

@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,11 +14,18 @@ from src.accounts.service import create_account
 from src.banking.adapters.base import AuthResult
 from src.banking.adapters.fints_adapter import FinTSAdapter
 from src.banking.models import BankConnection
+from src.classification.service import reclassify_user_transactions
 from src.core.cache import rate_limit_check
 from src.core.security import decrypt_field, encrypt_field
 from src.transactions.service import add_transaction
 
 logger = logging.getLogger(__name__)
+
+
+def import_since_date(today: date | None = None) -> date:
+    """First day of the previous calendar month (July 1 when today is in August)."""
+    today = today or date.today()
+    return (today.replace(day=1) - timedelta(days=1)).replace(day=1)
 
 
 async def create_bank_connection(
@@ -49,7 +55,7 @@ async def sync_bank_connection(
     session: AsyncSession,
     connection_id: uuid.UUID,
     pin: str,
-    since_days: int = 90,
+    since_days: int | None = None,
 ) -> tuple[bool, str, AuthResult | None]:
     """Execute transaction sync for a bank connection.
 
@@ -91,7 +97,7 @@ async def complete_tan_sync(
     connection_id: uuid.UUID,
     session_data: dict,
     tan: str,
-    since_days: int = 90,
+    since_days: int | None = None,
 ) -> tuple[bool, str]:
     """Submit TAN response and finish transaction import."""
     stmt = select(BankConnection).where(BankConnection.id == connection_id)
@@ -117,7 +123,7 @@ async def _execute_import(
     conn: BankConnection,
     adapter: FinTSAdapter,
     session_data: dict,
-    since_days: int,
+    since_days: int | None,
 ) -> None:
     """Internal helper to pull accounts & transactions from connected adapter."""
     try:
@@ -125,7 +131,11 @@ async def _execute_import(
         await session.flush()
 
         accounts = await adapter.fetch_accounts(session_data)
-        since_date = date.today() - timedelta(days=since_days)
+        since_date = (
+            date.today() - timedelta(days=since_days)
+            if since_days is not None
+            else import_since_date()
+        )
 
         for b_acc in accounts:
             # Match existing user account by IBAN or create new one
@@ -168,8 +178,11 @@ async def _execute_import(
                     # Duplicate skipped
                     pass
 
+        classified = await reclassify_user_transactions(session, conn.user_id)
+        logger.info("Auto-classified %d transactions after sync", classified)
+
         conn.sync_status = "idle"
-        conn.last_synced_at = datetime.now(timezone.utc)
+        conn.last_synced_at = datetime.now(UTC)
         conn.last_error = None
         await session.flush()
 

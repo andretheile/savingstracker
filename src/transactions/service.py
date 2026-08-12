@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
-from typing import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.classification.service import classify_transaction
 from src.transactions.models import Transaction
@@ -79,10 +80,13 @@ async def list_transactions(
     category_id: uuid.UUID | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
-    limit: int = 100,
+    limit: int = 500,
 ) -> Sequence[Transaction]:
     """Query transactions with optional filtering."""
-    stmt = select(Transaction)
+    stmt = select(Transaction).options(
+        selectinload(Transaction.account),
+        selectinload(Transaction.category),
+    )
     if account_id:
         stmt = stmt.where(Transaction.account_id == account_id)
     if category_id:

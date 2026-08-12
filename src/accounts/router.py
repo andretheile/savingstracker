@@ -1,8 +1,7 @@
 """FastAPI router for Bank Account management."""
 
-from decimal import Decimal
-from typing import List
 import uuid
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -32,6 +31,7 @@ class AccountResponse(BaseModel):
     currency: str
     initial_balance: float
     is_active: bool
+    include_in_household: bool = True
 
     class Config:
         from_attributes = True
@@ -77,11 +77,12 @@ async def api_get_account(
         currency=acc.currency,
         initial_balance=float(acc.initial_balance),
         is_active=acc.is_active,
+        include_in_household=bool(acc.include_in_household),
         current_balance=bal,
     )
 
 
-@router.get("/user/{user_id}", response_model=List[AccountBalanceResponse])
+@router.get("/user/{user_id}", response_model=list[AccountBalanceResponse])
 async def api_list_accounts(
     user_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -98,7 +99,27 @@ async def api_list_accounts(
             currency=acc.currency,
             initial_balance=float(acc.initial_balance),
             is_active=acc.is_active,
+            include_in_household=bool(acc.include_in_household),
             current_balance=bal,
         )
         response.append(item)
     return response
+
+
+class AccountHouseholdUpdate(BaseModel):
+    include_in_household: bool
+
+
+@router.patch("/{account_id}/household", response_model=AccountResponse)
+async def api_set_account_household(
+    account_id: uuid.UUID,
+    data: AccountHouseholdUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(Account).where(Account.id == account_id)
+    acc = (await db.execute(stmt)).scalar_one_or_none()
+    if not acc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    acc.include_in_household = data.include_in_household
+    await db.flush()
+    return acc

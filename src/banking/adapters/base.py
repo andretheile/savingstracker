@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -17,6 +17,7 @@ class BankAccountInfo:
     account_name: str
     currency: str = "EUR"
     account_type: str = "checking"  # checking | savings | credit
+    balance: Decimal | None = None
 
 
 @dataclass

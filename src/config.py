@@ -24,6 +24,10 @@ class Settings(BaseSettings):
 
     # ── Telegram ──────────────────────────────────────────
     telegram_bot_token: str = ""
+    # Comma-separated Telegram user IDs. Empty = any linked account.
+    telegram_allowed_user_ids: str = ""
+    # Comma-separated group/supergroup chat IDs. Empty = no group access.
+    telegram_allowed_chat_ids: str = ""
 
     # ── LLM (OpenRouter) ──────────────────────────────────
     openrouter_api_key: str = ""

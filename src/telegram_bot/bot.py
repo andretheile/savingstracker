@@ -59,7 +59,7 @@ async def start_polling(token: str | None = None) -> str | None:
     set_bot_identity(me.username, me.first_name)
     await app.start()
     if app.updater:
-        await app.updater.start_polling()
+        await app.updater.start_polling(allowed_updates=["message", "edited_message"])
     _bot_app = app
     logger.info("Telegram bot polling started as @%s", me.username)
     return me.username

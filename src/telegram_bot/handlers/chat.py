@@ -12,7 +12,7 @@ from telegram.ext import ContextTypes
 from src.config import settings
 from src.core.database import get_standalone_session
 from src.llm.agent import clear_history, run_agent
-from src.telegram_bot.handlers.common import is_group_chat, resolve_finance_user
+from src.telegram_bot.handlers.common import authorize_telegram_user, is_group_chat
 from src.telegram_bot.linking import get_bot_username
 
 logger = logging.getLogger(__name__)
@@ -72,11 +72,14 @@ def bot_was_addressed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
 
     username = bot_username(context).lower()
     text = message.text or ""
+    if username and f"@{username}" in text.lower():
+        return True
+
     for entity in message.entities or []:
         entity_type = getattr(entity, "type", "")
         if entity_type == "mention" and username:
-            mention = text[entity.offset : entity.offset + entity.length]
-            if mention.lstrip("@").lower() == username:
+            mention = _entity_text(message, entity).lstrip("@").lower()
+            if mention == username:
                 return True
         if entity_type == "text_mention":
             mentioned = getattr(entity, "user", None)
@@ -85,18 +88,39 @@ def bot_was_addressed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
     return False
 
 
+def _entity_text(message, entity) -> str:
+    parse = getattr(message, "parse_entity", None)
+    if callable(parse):
+        try:
+            return parse(entity) or ""
+        except Exception:
+            pass
+    text = message.text or ""
+    start = getattr(entity, "offset", 0)
+    length = getattr(entity, "length", 0)
+    return text[start : start + length]
+
+
 async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message or not update.effective_chat:
         return
     if not bot_was_addressed(update, context):
+        if is_group_chat(update):
+            logger.info(
+                "Ignoring group message without @%s mention or reply",
+                bot_username(context) or "bot",
+            )
         return
 
     raw = (update.effective_message.text or "").strip()
     text = strip_bot_mention(raw, bot_username(context))
     if not text:
+        await update.effective_message.reply_text(
+            "Ask me about spending, or reply to this message with a question."
+        )
         return
 
-    user = await resolve_finance_user(update)
+    user = await authorize_telegram_user(update)
     if user is None:
         return
 
@@ -135,7 +159,7 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def reset_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message or not update.effective_chat:
         return
-    user = await resolve_finance_user(update)
+    user = await authorize_telegram_user(update)
     if user is None:
         return
     clear_history(update.effective_chat.id)

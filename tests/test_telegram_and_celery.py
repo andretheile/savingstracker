@@ -24,6 +24,7 @@ from src.scheduler.tasks import (
     generate_user_monthly_report,
 )
 from src.telegram_bot.handlers.balance import balance_handler
+from src.telegram_bot.handlers.common import parse_id_set
 from src.telegram_bot.handlers.kpis import kpis_handler, newkpi_handler
 from src.telegram_bot.handlers.projections import projection_handler
 from src.telegram_bot.handlers.start import help_handler, start_handler
@@ -96,6 +97,48 @@ async def test_telegram_all_handlers(async_session: AsyncSession):
         # /balance
         await balance_handler(update, context)
         assert reply_mock.called
+
+
+def test_parse_id_set():
+    assert parse_id_set("") == frozenset()
+    assert parse_id_set("  ") == frozenset()
+    assert parse_id_set("123, -1001; 456") == frozenset({123, -1001, 456})
+    assert parse_id_set("12,nope,34") == frozenset({12, 34})
+
+
+@pytest.mark.asyncio
+async def test_unlinked_private_chat_is_denied(async_session: AsyncSession):
+    from src.telegram_bot.handlers.chat import chat_handler
+
+    update = MagicMock()
+    update.effective_user = MagicMock()
+    update.effective_user.id = 424242
+    update.effective_chat = MagicMock()
+    update.effective_chat.id = 424242
+    update.effective_chat.type = "private"
+    update.effective_message = MagicMock()
+    update.effective_message.text = "what did we spend?"
+    reply = AsyncMock()
+    update.effective_message.reply_text = reply
+    run_agent = AsyncMock(return_value="should not run")
+
+    @asynccontextmanager
+    async def mock_standalone():
+        yield async_session
+
+    with (
+        patch(
+            "src.telegram_bot.handlers.common.get_standalone_session",
+            side_effect=mock_standalone,
+        ),
+        patch("src.telegram_bot.handlers.chat.run_agent", run_agent),
+        patch("src.telegram_bot.handlers.chat.settings.openrouter_api_key", "sk-test"),
+    ):
+        await chat_handler(update, MagicMock())
+
+    run_agent.assert_not_awaited()
+    reply.assert_awaited()
+    assert "not linked" in reply.await_args.args[0].lower()
 
 
 def test_telegram_link_code_roundtrip():

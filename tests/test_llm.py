@@ -286,6 +286,11 @@ def test_group_addressing_helpers():
     assert bot_was_addressed(update, context) is True
 
     update.effective_message.entities = []
+    update.effective_message.reply_to_message = None
+    update.effective_message.text = "hey @SavingsBot grocery spend?"
+    assert bot_was_addressed(update, context) is True
+
+    update.effective_message.text = "what did we spend on groceries?"
     reply_from = MagicMock()
     reply_from.id = 42
     update.effective_message.reply_to_message = MagicMock()
@@ -360,9 +365,124 @@ async def test_group_chat_replies_when_mentioned(async_session: AsyncSession):
             new_callable=AsyncMock,
             return_value="Groceries: 120",
         ),
+        patch(
+            "src.telegram_bot.handlers.common.settings.telegram_allowed_chat_ids",
+            "-1001",
+        ),
     ):
         await chat_handler(update, context)
 
+    reply.assert_awaited()
+    assert "Groceries" in reply.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_group_chat_denies_unlisted_group(async_session: AsyncSession):
+    await get_or_create_user_by_telegram_id(async_session, 555111, "Bot User")
+    mention = MagicMock()
+    mention.type = "mention"
+    mention.offset = 0
+    mention.length = len("@SavingsBot")
+
+    update = MagicMock()
+    update.effective_user = MagicMock()
+    update.effective_user.id = 555111
+    update.effective_chat = MagicMock()
+    update.effective_chat.id = -9999
+    update.effective_chat.type = "supergroup"
+    update.effective_message = MagicMock()
+    update.effective_message.text = "@SavingsBot grocery spend?"
+    update.effective_message.entities = [mention]
+    update.effective_message.reply_to_message = None
+    reply = AsyncMock()
+    update.effective_message.reply_text = reply
+
+    context = MagicMock()
+    context.bot.username = "SavingsBot"
+    context.bot.id = 42
+    run_agent = AsyncMock(return_value="should not run")
+
+    @asynccontextmanager
+    async def mock_standalone():
+        yield async_session
+
+    with (
+        patch("src.telegram_bot.handlers.chat.settings.openrouter_api_key", "sk-test"),
+        patch(
+            "src.telegram_bot.handlers.common.get_standalone_session",
+            side_effect=mock_standalone,
+        ),
+        patch("src.telegram_bot.handlers.chat.run_agent", run_agent),
+        patch(
+            "src.telegram_bot.handlers.common.settings.telegram_allowed_chat_ids",
+            "",
+        ),
+    ):
+        await chat_handler(update, context)
+
+    run_agent.assert_not_awaited()
+    reply.assert_awaited()
+    assert "not allowed" in reply.await_args.args[0].lower()
+    assert "-9999" in reply.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_group_chat_allows_unlinked_member_in_allowlisted_group(
+    async_session: AsyncSession,
+):
+    from src.users.service import get_or_create_default_user
+
+    household = await get_or_create_default_user(async_session)
+    mention = MagicMock()
+    mention.type = "mention"
+    mention.offset = 0
+    mention.length = len("@SavingsBot")
+
+    update = MagicMock()
+    update.effective_user = MagicMock()
+    update.effective_user.id = 777000
+    update.effective_user.first_name = "Partner"
+    update.effective_user.username = "partner"
+    update.effective_chat = MagicMock()
+    update.effective_chat.id = -1001
+    update.effective_chat.type = "supergroup"
+    update.effective_message = MagicMock()
+    update.effective_message.text = "@SavingsBot grocery spend?"
+    update.effective_message.entities = [mention]
+    update.effective_message.reply_to_message = None
+    reply = AsyncMock()
+    update.effective_message.reply_text = reply
+
+    context = MagicMock()
+    context.bot.username = "SavingsBot"
+    context.bot.id = 42
+    context.bot.send_chat_action = AsyncMock()
+    run_agent = AsyncMock(return_value="Groceries: 120")
+
+    @asynccontextmanager
+    async def mock_standalone():
+        yield async_session
+
+    with (
+        patch("src.telegram_bot.handlers.chat.settings.openrouter_api_key", "sk-test"),
+        patch(
+            "src.telegram_bot.handlers.chat.get_standalone_session",
+            side_effect=mock_standalone,
+        ),
+        patch(
+            "src.telegram_bot.handlers.common.get_standalone_session",
+            side_effect=mock_standalone,
+        ),
+        patch("src.telegram_bot.handlers.chat.run_agent", run_agent),
+        patch(
+            "src.telegram_bot.handlers.common.settings.telegram_allowed_chat_ids",
+            "-1001",
+        ),
+    ):
+        await chat_handler(update, context)
+
+    run_agent.assert_awaited()
+    assert run_agent.await_args.args[1] == household.id
     reply.assert_awaited()
     assert "Groceries" in reply.await_args.args[0]
 

@@ -4,7 +4,8 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from src.core.database import get_standalone_session
-from src.telegram_bot.linking import consume_link_code
+from src.telegram_bot.handlers.common import is_group_chat
+from src.telegram_bot.linking import consume_link_code, get_bot_username
 from src.users.service import get_user_by_telegram_id, link_telegram_id
 
 
@@ -44,11 +45,13 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if linked_now
         else f"Welcome back, *{user_name}*."
     )
+    bot = get_bot_username()
+    group_hint = f"@{bot}" if bot else "the bot"
     msg = (
         f"{intro}\n\n"
         "Just send a message to ask about spending, recategorize a payment, "
         "or change household settings.\n"
-        "In a group, @mention the bot or reply to it.\n\n"
+        f"In a group, @mention {group_hint} or reply to it.\n\n"
         "📌 *Commands*\n"
         "• /kpis — Household KPIs for this month\n"
         "• /balance — Income vs expenses\n"
@@ -57,6 +60,12 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "• /reset — Clear chat history\n"
         "• /help — Command list\n"
     )
+    if is_group_chat(update) and update.effective_chat is not None:
+        msg += (
+            f"\nThis group's chat id is `{update.effective_chat.id}`. "
+            "Add it to TELEGRAM_ALLOWED_CHAT_IDS so anyone here can ask "
+            "about household finances."
+        )
     await update.effective_message.reply_text(msg, parse_mode="Markdown")
 
 
@@ -73,8 +82,9 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/projection — 20-year growth scenarios\n"
         "/balance — This month's income vs expenses\n"
         "/reset — Clear chat history\n\n"
-        "Or just type a question in a private chat. In a group, @mention the bot "
-        "or reply to one of its messages. Chat needs an OpenRouter key in the web app.\n\n"
+        "Or just type a question in a private chat. Groups only work if their "
+        "chat id is on TELEGRAM_ALLOWED_CHAT_IDS; @mention the bot or reply to it. "
+        "Chat needs an OpenRouter key in the web app.\n\n"
         "Link this chat from the web app if /kpis says you are not connected."
     )
     await update.effective_message.reply_text(msg, parse_mode="Markdown")

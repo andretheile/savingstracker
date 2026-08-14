@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.accounts.models import Account
 from src.auth.models import AuthIdentity, HouseholdInvite
+from src.banking.models import BankConnection
+from src.classification.models import Category, ClassificationRule
 from src.config import settings
+from src.kpis.models import KPIDefinition, KPISnapshot
+from src.projections.models import ProjectionConfig, ProjectionSnapshot
+from src.scheduler.models import MonthlyReport
+from src.transactions.models import Transaction
 from src.users.credentials import copy_legacy_secrets_if_empty
 from src.users.models import User
 from src.users.service import get_user_by_id, list_active_users
@@ -100,6 +107,57 @@ async def remove_household_member(session: AsyncSession, user_id: uuid.UUID, ema
         raise ValueError("Cannot remove the last household member.")
     await session.delete(identity)
     await session.flush()
+
+
+async def list_households_for_admin(session: AsyncSession) -> list[tuple[User, list[str], int]]:
+    users = list((await session.execute(select(User).order_by(User.created_at))).scalars().all())
+    identities = list((await session.execute(select(AuthIdentity))).scalars().all())
+    emails_by_user: dict[uuid.UUID, list[str]] = {row.id: [] for row in users}
+    for identity in identities:
+        emails_by_user.setdefault(identity.user_id, []).append(identity.email)
+    counts = (
+        await session.execute(select(Account.user_id, func.count()).group_by(Account.user_id))
+    ).all()
+    account_counts = {user_id: int(count) for user_id, count in counts}
+    return [
+        (user, emails_by_user.get(user.id, []), account_counts.get(user.id, 0))
+        for user in users
+    ]
+
+
+async def delete_household(
+    session: AsyncSession,
+    household_id: uuid.UUID,
+    *,
+    acting_user_id: uuid.UUID,
+) -> None:
+    if household_id == acting_user_id:
+        raise ValueError("Cannot delete your own household.")
+    user = await get_user_by_id(session, household_id)
+    if user is None:
+        raise ValueError("Household not found.")
+
+    from src.telegram_bot.bot import stop_polling_for_user
+
+    await stop_polling_for_user(household_id)
+
+    account_ids = select(Account.id).where(Account.user_id == household_id)
+    kpi_ids = select(KPIDefinition.id).where(KPIDefinition.user_id == household_id)
+    projection_ids = select(ProjectionConfig.id).where(ProjectionConfig.user_id == household_id)
+    await session.execute(delete(HouseholdInvite).where(HouseholdInvite.user_id == household_id))
+    await session.execute(delete(AuthIdentity).where(AuthIdentity.user_id == household_id))
+    await session.execute(delete(Transaction).where(Transaction.account_id.in_(account_ids)))
+    await session.execute(delete(Account).where(Account.user_id == household_id))
+    await session.execute(delete(BankConnection).where(BankConnection.user_id == household_id))
+    await session.execute(delete(ClassificationRule).where(ClassificationRule.user_id == household_id))
+    await session.execute(delete(Category).where(Category.user_id == household_id))
+    await session.execute(delete(KPISnapshot).where(KPISnapshot.user_id == household_id))
+    await session.execute(delete(KPIDefinition).where(KPIDefinition.id.in_(kpi_ids)))
+    await session.execute(delete(ProjectionSnapshot).where(ProjectionSnapshot.user_id == household_id))
+    await session.execute(delete(ProjectionConfig).where(ProjectionConfig.id.in_(projection_ids)))
+    await session.execute(delete(MonthlyReport).where(MonthlyReport.user_id == household_id))
+    await session.execute(delete(User).where(User.id == household_id))
+    session.expire_all()
 
 
 async def resolve_google_user(

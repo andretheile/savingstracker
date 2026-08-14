@@ -16,7 +16,7 @@ class AuthIdentity(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "auth_identities"
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUIDType, ForeignKey("users.id"), nullable=False, index=True
+        UUIDType, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     google_sub: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
@@ -30,7 +30,7 @@ class HouseholdInvite(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "household_invites"
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUIDType, ForeignKey("users.id"), nullable=False, index=True
+        UUIDType, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     invited_by_email: Mapped[str] = mapped_column(String(255), nullable=False)

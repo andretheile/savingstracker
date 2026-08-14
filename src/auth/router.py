@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.auth.dependencies import CurrentUser
+from src.auth.dependencies import AdminUser, CurrentUser, is_admin_email
 from src.auth.service import (
     AuthDeniedError,
     create_household_invite,
+    delete_household,
     delete_household_invite,
     list_household_identities,
     list_household_invites,
+    list_households_for_admin,
     normalize_email,
     remove_household_member,
     resolve_google_user,
@@ -24,6 +28,7 @@ from src.core.dependencies import get_db
 pages_router = APIRouter(tags=["auth"])
 api_router = APIRouter(prefix="/auth", tags=["auth"])
 household_router = APIRouter(prefix="/household", tags=["household"])
+admin_router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 def _oauth():
@@ -115,16 +120,19 @@ class AuthMeResponse(BaseModel):
     email: str
     name: str
     picture: str | None = None
+    is_admin: bool = False
 
 
 @api_router.get("/me", response_model=AuthMeResponse)
 async def auth_me(request: Request, user: CurrentUser):
     session_user = request.session.get("user") or {}
+    email = session_user.get("email") or ""
     return AuthMeResponse(
         user_id=str(user.id),
-        email=session_user.get("email") or "",
+        email=email,
         name=session_user.get("name") or user.name,
         picture=session_user.get("picture"),
+        is_admin=is_admin_email(email),
     )
 
 
@@ -190,4 +198,45 @@ async def remove_member(email: str, user: CurrentUser, db: AsyncSession = Depend
         await remove_household_member(db, user.id, email)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"ok": True}
+
+
+class AdminHouseholdResponse(BaseModel):
+    id: str
+    name: str
+    emails: list[str]
+    account_count: int
+    is_current: bool
+
+
+@admin_router.get("/households", response_model=list[AdminHouseholdResponse])
+async def admin_list_households(user: AdminUser, db: AsyncSession = Depends(get_db)):
+    rows = await list_households_for_admin(db)
+    return [
+        AdminHouseholdResponse(
+            id=str(household.id),
+            name=household.name,
+            emails=emails,
+            account_count=account_count,
+            is_current=household.id == user.id,
+        )
+        for household, emails, account_count in rows
+    ]
+
+
+@admin_router.delete("/households/{household_id}")
+async def admin_delete_household(
+    household_id: uuid.UUID,
+    user: AdminUser,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await delete_household(db, household_id, acting_user_id=user.id)
+    except ValueError as exc:
+        code = (
+            status.HTTP_404_NOT_FOUND
+            if "not found" in str(exc).lower()
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
     return {"ok": True}

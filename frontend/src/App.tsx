@@ -9,6 +9,7 @@ import { TransactionsTable } from './components/TransactionsTable';
 import { TelegramStatusCard } from './components/TelegramStatusCard';
 import { ChatView } from './components/ChatView';
 import { HouseholdMembersCard } from './components/HouseholdMembersCard';
+import { AdminHouseholdsCard } from './components/AdminHouseholdsCard';
 import { fetchJson, loadDashboard } from './api';
 import type { Account, BalanceSheetData, KPISnapshot, Transaction } from './types';
 
@@ -47,6 +48,7 @@ function isUnauthorized(err: unknown) {
 
 export function App() {
   const [authEmail, setAuthEmail] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -59,8 +61,9 @@ export function App() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
 
   const refresh = useCallback(async () => {
-    const me = await fetchJson<{ email: string }>('/auth/me');
+    const me = await fetchJson<{ email: string; is_admin?: boolean }>('/auth/me');
     setAuthEmail(me.email);
+    setIsAdmin(Boolean(me.is_admin));
     const data = await loadDashboard();
     setUserId(data.userId);
     setAccounts(data.accounts);
@@ -89,6 +92,7 @@ export function App() {
       /* still show the login screen */
     }
     setAuthEmail(null);
+    setIsAdmin(false);
     setUserId(null);
   };
 
@@ -243,9 +247,11 @@ export function App() {
               <h2 className="text-lg font-semibold text-[#1A1714] font-heading">Settings</h2>
               <p className="text-xs text-[#6B645A] mt-0.5">
                 Household members, Telegram bot, and OpenRouter key for this dashboard.
+                {isAdmin ? ' Admins can also remove other households.' : ''}
               </p>
             </div>
             <HouseholdMembersCard />
+            {isAdmin && <AdminHouseholdsCard />}
             <TelegramStatusCard />
           </div>
         )}

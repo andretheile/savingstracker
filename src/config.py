@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     # Empty = any Google account may create a household. Non-empty = signup gate.
     # Household invites can still add emails that are not on this list.
     allowed_emails: str = ""
+    # Comma-separated Google emails that can list/delete other households.
+    admin_emails: str = ""
     public_base_url: str = ""
     cors_extra_origins: str = ""
 
@@ -53,13 +55,21 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     debug: bool = False
 
-    @property
-    def allowed_email_set(self) -> frozenset[str]:
+    @staticmethod
+    def _email_set(raw: str) -> frozenset[str]:
         return frozenset(
             part.strip().lower()
-            for part in self.allowed_emails.replace(";", ",").split(",")
+            for part in raw.replace(";", ",").split(",")
             if part.strip()
         )
+
+    @property
+    def allowed_email_set(self) -> frozenset[str]:
+        return self._email_set(self.allowed_emails)
+
+    @property
+    def admin_email_set(self) -> frozenset[str]:
+        return self._email_set(self.admin_emails)
 
     @property
     def cors_origins(self) -> list[str]:

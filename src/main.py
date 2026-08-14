@@ -23,8 +23,8 @@ import src.users.models  # noqa
 from src.accounts.router import router as accounts_router
 from src.accounts.service import apply_default_household_selection
 from src.auth.dependencies import get_current_user
+from src.auth.router import admin_router, household_router
 from src.auth.router import api_router as auth_api_router
-from src.auth.router import household_router
 from src.auth.router import pages_router as auth_pages_router
 from src.balance_sheets.router import router as balance_sheets_router
 from src.banking.router import router as banking_router
@@ -106,6 +106,7 @@ app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 app.include_router(auth_pages_router)
 app.include_router(auth_api_router, prefix="/api")
 app.include_router(household_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(admin_router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(users_router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(accounts_router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(banking_router, prefix="/api", dependencies=[Depends(get_current_user)])

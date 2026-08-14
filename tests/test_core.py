@@ -34,6 +34,8 @@ def test_config_settings():
     )
     assert "postgresql+psycopg2" in s.sync_database_url
     assert s.openrouter_model
+    s_admin = Settings(admin_emails="Andre@Example.com, other@x.com")
+    assert s_admin.admin_email_set == frozenset({"andre@example.com", "other@x.com"})
 
 
 def test_persist_env_value(tmp_path, monkeypatch):

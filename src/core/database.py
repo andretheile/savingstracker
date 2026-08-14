@@ -68,12 +68,16 @@ async def ensure_schema() -> None:
                 return set()
             return {c["name"] for c in insp.get_columns(table)}
 
+        dialect = conn.engine.dialect.name
+        bool_false = "FALSE" if dialect == "postgresql" else "0"
+        bool_true = "TRUE" if dialect == "postgresql" else "1"
+
         cols = await conn.run_sync(lambda c: column_names(c, "transactions"))
         if cols and "exclude_from_totals" not in cols:
             await conn.execute(
                 text(
                     "ALTER TABLE transactions ADD COLUMN exclude_from_totals "
-                    "BOOLEAN DEFAULT 0 NOT NULL"
+                    f"BOOLEAN DEFAULT {bool_false} NOT NULL"
                 )
             )
 
@@ -82,14 +86,14 @@ async def ensure_schema() -> None:
             await conn.execute(
                 text(
                     "ALTER TABLE accounts ADD COLUMN include_in_household "
-                    "BOOLEAN DEFAULT 1 NOT NULL"
+                    f"BOOLEAN DEFAULT {bool_true} NOT NULL"
                 )
             )
         if acc_cols and "is_depot" not in acc_cols:
             await conn.execute(
                 text(
                     "ALTER TABLE accounts ADD COLUMN is_depot "
-                    "BOOLEAN DEFAULT 0 NOT NULL"
+                    f"BOOLEAN DEFAULT {bool_false} NOT NULL"
                 )
             )
 

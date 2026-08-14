@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.auth.dependencies import CurrentUser, require_same_household
 from src.classification.models import Category
 from src.classification.service import reclassify_user_transactions
 from src.core.dependencies import get_db
@@ -73,12 +74,14 @@ def _to_response(tx: Transaction) -> TransactionResponse:
 @router.post("/", response_model=TransactionResponse, status_code=status.HTTP_201_CREATED)
 async def api_add_transaction(
     data: TransactionCreate,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_same_household(data.user_id, user)
     try:
         tx = await add_transaction(
             db,
-            user_id=data.user_id,
+            user_id=user.id,
             account_id=data.account_id,
             tx_date=data.transaction_date,
             amount=data.amount,
@@ -108,6 +111,7 @@ class TransactionCategoryUpdate(BaseModel):
 async def api_set_transaction_category(
     tx_id: uuid.UUID,
     data: TransactionCategoryUpdate,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     stmt = (
@@ -116,7 +120,7 @@ async def api_set_transaction_category(
         .where(Transaction.id == tx_id)
     )
     tx = (await db.execute(stmt)).scalar_one_or_none()
-    if not tx:
+    if not tx or tx.account is None or tx.account.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
 
     cat_stmt = select(Category).where(Category.name == data.category_name).limit(1)
@@ -139,6 +143,7 @@ class TransactionExcludeUpdate(BaseModel):
 async def api_set_transaction_exclude(
     tx_id: uuid.UUID,
     data: TransactionExcludeUpdate,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     stmt = (
@@ -147,7 +152,7 @@ async def api_set_transaction_exclude(
         .where(Transaction.id == tx_id)
     )
     tx = (await db.execute(stmt)).scalar_one_or_none()
-    if not tx:
+    if not tx or tx.account is None or tx.account.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
 
     tx.exclude_from_totals = data.exclude_from_totals
@@ -158,14 +163,17 @@ async def api_set_transaction_exclude(
 @router.post("/reclassify")
 async def api_reclassify_transactions(
     user_id: uuid.UUID,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_same_household(user_id, user)
     updated = await reclassify_user_transactions(db, user_id)
     return {"updated": updated}
 
 
 @router.get("/", response_model=list[TransactionResponse])
 async def api_list_transactions(
+    user: CurrentUser,
     account_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
     start_date: date | None = None,
@@ -175,6 +183,7 @@ async def api_list_transactions(
 ):
     txs = await list_transactions(
         db,
+        user_id=user.id,
         account_id=account_id,
         category_id=category_id,
         start_date=start_date,

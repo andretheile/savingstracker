@@ -39,6 +39,8 @@ TOOL_LABELS = {
     "get_projection": "Running the savings projection",
     "update_projection_config": "Updating projection settings",
     "reclassify_transactions": "Re-running auto-classification",
+    "sync_bank": "Refreshing bank data",
+    "confirm_bank_sync": "Finishing bank sync after app approval",
 }
 
 
@@ -61,7 +63,9 @@ def _system_prompt(channel: str) -> str:
         "- Always use tools for numbers. Do not invent balances or transactions.\n"
         "- Expenses are negative amounts when adding transactions.\n"
         f"- {brevity}\n"
-        "- Never ask for or handle bank PINs, TANs, or FinTS credentials.\n"
+        "- Never ask for a bank PIN or TAN. Sync uses the PIN stored encrypted when the bank was linked.\n"
+        "- If sync_bank returns needs_approval, tell the user to confirm in the DKB app, then wait for them to say they did before calling confirm_bank_sync.\n"
+        "- If a tool returns missing_pin, tell them to link the bank once more in Banking → Link account.\n"
         "- If a tool returns an error, explain it and suggest a fix.\n"
         "- After changing data, say what you changed."
     )
@@ -135,6 +139,14 @@ def _summarize_tool_result(raw: str) -> str:
             return f"{data['count']} matches"
         if "updated" in data:
             return f"{data['updated']} updated"
+        if data.get("status") == "needs_approval":
+            return "Waiting for DKB app approval"
+        if data.get("status") == "synced":
+            return data.get("message") or "Bank synced"
+        if data.get("status") == "missing_pin":
+            return "PIN not stored yet"
+        if data.get("status") == "no_connection":
+            return "No bank linked"
         if "name" in data and "household" in data:
             flag = "household" if data["household"] else "personal"
             return f"{data['name']} → {flag}"
@@ -164,6 +176,8 @@ async def iter_agent_events(
     user_text: str,
     chat_id: int | str,
     channel: str = "telegram",
+    api_key: str | None = None,
+    model: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     key = str(chat_id)
     history = _history[key]
@@ -175,7 +189,7 @@ async def iter_agent_events(
 
     final_text = ""
     for _ in range(MAX_TOOL_ROUNDS):
-        message = await chat_completion(messages, tools=TOOL_DEFINITIONS)
+        message = await chat_completion(messages, tools=TOOL_DEFINITIONS, api_key=api_key, model=model)
         tool_calls = message.get("tool_calls") or []
         content = (message.get("content") or "").strip()
         assistant_msg: dict[str, Any] = {
@@ -253,9 +267,13 @@ async def run_agent(
     user_text: str,
     chat_id: int | str,
     channel: str = "telegram",
+    api_key: str | None = None,
+    model: str | None = None,
 ) -> str:
     reply = "Done."
-    async for event in iter_agent_events(session, user_id, user_text, chat_id, channel):
+    async for event in iter_agent_events(
+        session, user_id, user_text, chat_id, channel, api_key=api_key, model=model
+    ):
         if event.get("type") == "reply":
             reply = event["content"]
     return reply

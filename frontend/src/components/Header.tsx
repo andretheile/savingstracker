@@ -1,25 +1,29 @@
 import React from 'react';
-import { RefreshCw, Plus, Search, Settings } from 'lucide-react';
+import { LogOut, RefreshCw, Plus, Search, Settings } from 'lucide-react';
 
 interface HeaderProps {
   onSyncBank: () => void;
   onOpenNewTx: () => void;
   onOpenNewKpi: () => void;
   onOpenSettings: () => void;
+  onLogout: () => void;
   settingsActive?: boolean;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   isSyncing: boolean;
+  userEmail?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onSyncBank,
   onOpenNewTx,
   onOpenSettings,
+  onLogout,
   settingsActive = false,
   searchQuery,
   setSearchQuery,
   isSyncing,
+  userEmail,
 }) => {
   return (
     <header className="py-3.5">
@@ -75,6 +79,15 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             <Settings className="w-3.5 h-3.5" strokeWidth={1.6} />
+          </button>
+          <button
+            type="button"
+            onClick={onLogout}
+            title={userEmail ? `Log out ${userEmail}` : 'Log out'}
+            className="cream-button h-8 px-3 text-xs text-[#6B645A] inline-flex items-center gap-1.5"
+          >
+            <LogOut className="w-3.5 h-3.5" strokeWidth={1.6} />
+            <span className="hidden sm:inline">Log out</span>
           </button>
         </div>
       </div>

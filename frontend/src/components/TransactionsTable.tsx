@@ -34,6 +34,7 @@ const CATEGORIES = [
   { name: 'Taxes & Fees', direction: 'expense' },
   { name: 'Cash', direction: 'expense' },
   { name: 'Other Expense', direction: 'expense' },
+  { name: 'Depot Transfer', direction: 'transfer' },
   { name: 'Savings & Investments', direction: 'transfer' },
   { name: 'Internal Transfer', direction: 'transfer' },
 ];

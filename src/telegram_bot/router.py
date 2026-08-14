@@ -10,18 +10,18 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import Bot
 
-from src.config import settings
+from src.auth.dependencies import CurrentUser
 from src.core.dependencies import get_db
-from src.core.envfile import persist_env_value
 from src.llm.openrouter import validate_api_key
-from src.telegram_bot.bot import persist_bot_token, start_polling, validate_bot_token
-from src.telegram_bot.linking import (
-    create_link_code,
-    deep_link_for,
-    get_bot_name,
-    get_bot_username,
+from src.telegram_bot.bot import start_polling_for_user, validate_bot_token
+from src.telegram_bot.linking import create_link_code, deep_link_for
+from src.users.credentials import (
+    openrouter_for_user,
+    set_openrouter_key,
+    set_telegram_token,
+    telegram_token_for_user,
 )
-from src.users.service import get_or_create_default_user, unlink_telegram
+from src.users.service import unlink_telegram
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 
@@ -56,26 +56,30 @@ def _next_digest_label() -> str:
 
 
 @router.get("/status", response_model=TelegramStatusResponse)
-async def telegram_status(db: AsyncSession = Depends(get_db)):
-    from src.telegram_bot.bot import bot_is_running
+async def telegram_status(user: CurrentUser):
+    from src.telegram_bot.bot import bot_is_running_for_user
 
-    user = await get_or_create_default_user(db)
-    configured = bool(settings.telegram_bot_token)
+    token = telegram_token_for_user(user)
+    llm_key, llm_model = openrouter_for_user(user)
     return TelegramStatusResponse(
-        bot_configured=configured,
-        bot_running=bot_is_running(),
-        bot_username=get_bot_username(),
-        bot_name=get_bot_name(),
+        bot_configured=bool(token),
+        bot_running=bot_is_running_for_user(user.id),
+        bot_username=user.telegram_bot_username,
+        bot_name=user.telegram_bot_name,
         connected=user.telegram_id is not None,
         telegram_id=user.telegram_id,
         next_digest=_next_digest_label(),
-        llm_configured=bool(settings.openrouter_api_key),
-        llm_model=settings.openrouter_model if settings.openrouter_api_key else None,
+        llm_configured=bool(llm_key),
+        llm_model=llm_model if llm_key else None,
     )
 
 
 @router.post("/token")
-async def set_telegram_token(data: TelegramTokenRequest):
+async def set_telegram_token_endpoint(
+    data: TelegramTokenRequest,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
     token = data.token.strip()
     if not token or ":" not in token:
         raise HTTPException(
@@ -90,9 +94,10 @@ async def set_telegram_token(data: TelegramTokenRequest):
             detail=f"Telegram rejected the token: {exc}",
         ) from exc
 
-    persist_bot_token(token)
+    set_telegram_token(user, token, username=username)
+    await db.flush()
     try:
-        await start_polling(token)
+        await start_polling_for_user(user.id, token, username=username)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -102,37 +107,35 @@ async def set_telegram_token(data: TelegramTokenRequest):
 
 
 @router.post("/link", response_model=TelegramLinkResponse)
-async def create_telegram_link(db: AsyncSession = Depends(get_db)):
-    if not settings.telegram_bot_token:
+async def create_telegram_link(user: CurrentUser):
+    if not telegram_token_for_user(user):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Set a Telegram bot token first.",
         )
-    user = await get_or_create_default_user(db)
     entry = create_link_code(user.id)
     return TelegramLinkResponse(
         code=entry.code,
-        deep_link=deep_link_for(entry.code),
-        bot_username=get_bot_username(),
+        deep_link=deep_link_for(entry.code, user.telegram_bot_username),
+        bot_username=user.telegram_bot_username,
     )
 
 
 @router.post("/unlink")
-async def unlink_telegram_account(db: AsyncSession = Depends(get_db)):
-    user = await get_or_create_default_user(db)
+async def unlink_telegram_account(user: CurrentUser, db: AsyncSession = Depends(get_db)):
     await unlink_telegram(db, user.id)
     return {"ok": True}
 
 
 @router.post("/test")
-async def send_test_message(db: AsyncSession = Depends(get_db)):
-    user = await get_or_create_default_user(db)
-    if not user.telegram_id or not settings.telegram_bot_token:
+async def send_test_message(user: CurrentUser):
+    token = telegram_token_for_user(user)
+    if not user.telegram_id or not token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Telegram is not connected yet.",
         )
-    bot = Bot(token=settings.telegram_bot_token)
+    bot = Bot(token=token)
     await bot.send_message(
         chat_id=user.telegram_id,
         text=(
@@ -149,11 +152,16 @@ class LLMConfigRequest(BaseModel):
 
 
 @router.post("/llm")
-async def set_llm_config(data: LLMConfigRequest):
+async def set_llm_config(
+    data: LLMConfigRequest,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
     key = data.api_key.strip()
-    model = (data.model or "").strip() or settings.openrouter_model
+    current_key, current_model = openrouter_for_user(user)
+    model = (data.model or "").strip() or current_model
 
-    if not key and not settings.openrouter_api_key:
+    if not key and not current_key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Paste an OpenRouter API key.",
@@ -172,7 +180,9 @@ async def set_llm_config(data: LLMConfigRequest):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(exc),
             ) from exc
-        persist_env_value("OPENROUTER_API_KEY", key)
-
-    persist_env_value("OPENROUTER_MODEL", model)
-    return {"ok": True, "model": settings.openrouter_model}
+        set_openrouter_key(user, api_key=key, model=model)
+    else:
+        set_openrouter_key(user, model=model)
+    await db.flush()
+    _, saved_model = openrouter_for_user(user)
+    return {"ok": True, "model": saved_model}

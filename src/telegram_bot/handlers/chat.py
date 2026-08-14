@@ -9,11 +9,15 @@ from telegram import Update
 from telegram.constants import ChatAction, ChatType
 from telegram.ext import ContextTypes
 
-from src.config import settings
 from src.core.database import get_standalone_session
 from src.llm.agent import clear_history, run_agent
-from src.telegram_bot.handlers.common import authorize_telegram_user, is_group_chat
+from src.telegram_bot.handlers.common import (
+    authorize_telegram_user,
+    household_id_from_context,
+    is_group_chat,
+)
 from src.telegram_bot.linking import get_bot_username
+from src.users.credentials import openrouter_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -120,11 +124,12 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         return
 
-    user = await authorize_telegram_user(update)
+    user = await authorize_telegram_user(update, household_id_from_context(context))
     if user is None:
         return
 
-    if not settings.openrouter_api_key:
+    api_key, model = openrouter_for_user(user)
+    if not api_key:
         await update.effective_message.reply_text(NO_LLM_KEY)
         return
 
@@ -144,6 +149,8 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 prompt,
                 update.effective_chat.id,
                 channel="telegram",
+                api_key=api_key,
+                model=model,
             )
     except Exception:
         logger.exception("LLM chat failed")
@@ -159,7 +166,7 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def reset_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message or not update.effective_chat:
         return
-    user = await authorize_telegram_user(update)
+    user = await authorize_telegram_user(update, household_id_from_context(context))
     if user is None:
         return
     clear_history(update.effective_chat.id)

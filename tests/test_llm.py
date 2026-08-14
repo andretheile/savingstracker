@@ -12,6 +12,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import src.accounts.models  # noqa
+import src.auth.models  # noqa
 import src.banking.models  # noqa
 import src.classification.models  # noqa
 import src.kpis.models  # noqa
@@ -19,6 +20,7 @@ import src.projections.models  # noqa
 import src.transactions.models  # noqa
 import src.users.models  # noqa
 from src.accounts.service import create_account
+from src.auth.dependencies import get_current_user
 from src.classification.service import seed_default_categories
 from src.core.base_model import Base
 from src.core.dependencies import get_db
@@ -26,7 +28,7 @@ from src.llm.agent import clear_history, run_agent
 from src.llm.tools import execute_tool
 from src.main import app
 from src.telegram_bot.handlers.chat import chat_handler, split_telegram
-from src.users.service import get_or_create_user_by_telegram_id
+from src.users.service import get_or_create_default_user, get_or_create_user_by_telegram_id
 
 
 @pytest.fixture
@@ -41,11 +43,22 @@ async def async_session():
 
 
 @pytest.fixture
-async def client(async_session: AsyncSession):
+async def household_user(async_session: AsyncSession):
+    user = await get_or_create_default_user(async_session)
+    await async_session.commit()
+    return user
+
+
+@pytest.fixture
+async def client(async_session: AsyncSession, household_user):
     async def _override_get_db():
         yield async_session
 
+    async def _override_user():
+        return household_user
+
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_current_user] = _override_user
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac
@@ -147,7 +160,7 @@ async def test_llm_agent_tool_loop(async_session: AsyncSession):
 
     calls = {"n": 0}
 
-    async def fake_completion(messages, tools=None, model=None):
+    async def fake_completion(messages, tools=None, model=None, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
             return {
@@ -186,7 +199,7 @@ async def test_agent_emits_thinking_and_tool_events(async_session: AsyncSession)
 
     calls = {"n": 0}
 
-    async def fake_completion(messages, tools=None, model=None):
+    async def fake_completion(messages, tools=None, model=None, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
             return {
@@ -248,7 +261,7 @@ async def test_chat_handler_requires_openrouter_key(async_session: AsyncSession)
         yield async_session
 
     with (
-        patch("src.telegram_bot.handlers.chat.settings.openrouter_api_key", ""),
+        patch("src.users.credentials.settings.openrouter_api_key", ""),
         patch(
             "src.telegram_bot.handlers.common.get_standalone_session",
             side_effect=mock_standalone,
@@ -351,7 +364,7 @@ async def test_group_chat_replies_when_mentioned(async_session: AsyncSession):
         yield async_session
 
     with (
-        patch("src.telegram_bot.handlers.chat.settings.openrouter_api_key", "sk-test"),
+        patch("src.users.credentials.settings.openrouter_api_key", "sk-test"),
         patch(
             "src.telegram_bot.handlers.chat.get_standalone_session",
             side_effect=mock_standalone,
@@ -407,7 +420,7 @@ async def test_group_chat_denies_unlisted_group(async_session: AsyncSession):
         yield async_session
 
     with (
-        patch("src.telegram_bot.handlers.chat.settings.openrouter_api_key", "sk-test"),
+        patch("src.users.credentials.settings.openrouter_api_key", "sk-test"),
         patch(
             "src.telegram_bot.handlers.common.get_standalone_session",
             side_effect=mock_standalone,
@@ -464,7 +477,7 @@ async def test_group_chat_allows_unlinked_member_in_allowlisted_group(
         yield async_session
 
     with (
-        patch("src.telegram_bot.handlers.chat.settings.openrouter_api_key", "sk-test"),
+        patch("src.users.credentials.settings.openrouter_api_key", "sk-test"),
         patch(
             "src.telegram_bot.handlers.chat.get_standalone_session",
             side_effect=mock_standalone,
@@ -497,29 +510,20 @@ async def test_telegram_status_includes_llm_fields(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_set_llm_config_validates_and_persists(client: AsyncClient):
-    from src.config import settings
-
-    old_key = settings.openrouter_api_key
-    old_model = settings.openrouter_model
-    try:
-        with (
-            patch("src.telegram_bot.router.validate_api_key", new_callable=AsyncMock) as validate,
-            patch("src.telegram_bot.router.persist_env_value") as persist,
-        ):
-            res = await client.post(
-                "/api/telegram/llm",
-                json={
-                    "api_key": "sk-or-v1-abcdefghijklmnopqrstuvwxyz",
-                    "model": "openai/gpt-4o-mini",
-                },
-            )
-            assert res.status_code == 200
-            validate.assert_awaited()
-            assert persist.call_count == 2
-    finally:
-        settings.openrouter_api_key = old_key
-        settings.openrouter_model = old_model
+async def test_set_llm_config_validates_and_persists(client: AsyncClient, household_user, async_session: AsyncSession):
+    with patch("src.telegram_bot.router.validate_api_key", new_callable=AsyncMock) as validate:
+        res = await client.post(
+            "/api/telegram/llm",
+            json={
+                "api_key": "sk-or-v1-abcdefghijklmnopqrstuvwxyz",
+                "model": "openai/gpt-4o-mini",
+            },
+        )
+        assert res.status_code == 200
+        validate.assert_awaited()
+    await async_session.refresh(household_user)
+    assert household_user.openrouter_api_key_encrypted
+    assert household_user.openrouter_model == "openai/gpt-4o-mini"
 
 
 @pytest.mark.asyncio
@@ -576,3 +580,29 @@ async def test_web_llm_chat_endpoint(client: AsyncClient, async_session: AsyncSe
         assert reset.json()["ok"] is True
     finally:
         settings.openrouter_api_key = old_key
+
+
+@pytest.mark.asyncio
+async def test_llm_sync_bank_tools(async_session: AsyncSession):
+    user = await get_or_create_user_by_telegram_id(async_session, 7771, "Sync User")
+    with patch(
+        "src.llm.tools.start_household_sync",
+        AsyncMock(
+            return_value={
+                "status": "needs_approval",
+                "bank": "DKB",
+                "message": "Approve the login in the DKB banking app",
+            }
+        ),
+    ) as start:
+        result = _parse(await execute_tool(async_session, user.id, "sync_bank", {}))
+        assert result["status"] == "needs_approval"
+        start.assert_awaited_once()
+
+    with patch(
+        "src.llm.tools.confirm_household_sync",
+        AsyncMock(return_value={"status": "synced", "bank": "DKB", "message": "Sync completed."}),
+    ) as confirm:
+        result = _parse(await execute_tool(async_session, user.id, "confirm_bank_sync", {}))
+        assert result["status"] == "synced"
+        confirm.assert_awaited_once()

@@ -8,6 +8,7 @@ export interface Account {
   bank_name?: string;
   is_active: boolean;
   include_in_household?: boolean;
+  is_depot?: boolean;
 }
 
 export interface Category {

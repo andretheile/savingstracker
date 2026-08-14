@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.auth.dependencies import CurrentUser, require_same_household
 from src.core.dependencies import get_db
 from src.projections.service import generate_user_projection, get_or_create_user_projection_config
 
@@ -60,8 +61,10 @@ async def compute_projection(
     user_id: uuid.UUID,
     period_start: date,
     period_end: date,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_same_household(user_id, user)
     proj_data, snapshot = await generate_user_projection(db, user_id, period_start, period_end)
 
     scenarios = [
@@ -92,8 +95,10 @@ async def compute_projection(
 @router.get("/config/{user_id}", response_model=ProjectionConfigResponse)
 async def get_projection_config(
     user_id: uuid.UUID,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_same_household(user_id, user)
     return await get_or_create_user_projection_config(db, user_id)
 
 
@@ -101,8 +106,10 @@ async def get_projection_config(
 async def update_projection_config(
     user_id: uuid.UUID,
     data: ProjectionConfigUpdate,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_same_household(user_id, user)
     config = await get_or_create_user_projection_config(db, user_id)
     if data.annual_return_pct is not None:
         config.annual_return_pct = data.annual_return_pct

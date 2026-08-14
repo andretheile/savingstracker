@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.accounts.models import Account
+from src.classification.service import normalize_iban
 from src.transactions.models import Transaction
 
 
@@ -20,18 +21,39 @@ async def create_account(
     iban: str | None = None,
     currency: str = "EUR",
     initial_balance: float = 0.0,
+    *,
+    is_depot: bool = False,
+    include_in_household: bool | None = None,
 ) -> Account:
     """Create a new bank account for a user."""
+    household = (not is_depot) if include_in_household is None else include_in_household
     account = Account(
         user_id=user_id,
         name=name,
-        iban=iban,
+        iban=normalize_iban(iban) or None,
         currency=currency,
         initial_balance=initial_balance,
+        is_depot=is_depot,
+        include_in_household=household,
     )
     session.add(account)
     await session.flush()
     return account
+
+
+async def find_account_by_iban(
+    session: AsyncSession,
+    iban: str,
+    user_id: uuid.UUID | None = None,
+) -> Account | None:
+    needle = normalize_iban(iban)
+    if not needle:
+        return None
+    stmt = select(Account)
+    if user_id is not None:
+        stmt = stmt.where(Account.user_id == user_id)
+    accounts = list((await session.execute(stmt)).scalars().all())
+    return next((acc for acc in accounts if normalize_iban(acc.iban) == needle), None)
 
 
 async def list_user_accounts(

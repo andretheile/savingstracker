@@ -24,8 +24,14 @@ export function currentMonthRange() {
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(`${getApiBase()}${path}`, {
     ...init,
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
   });
+  if (resp.status === 401) {
+    const err = new Error('Not authenticated');
+    (err as Error & { status?: number }).status = 401;
+    throw err;
+  }
   if (!resp.ok) {
     let detail = `${resp.status} ${path}`;
     try {
@@ -56,9 +62,15 @@ export async function streamChat(
 ): Promise<void> {
   const resp = await fetch(`${getApiBase()}/llm/chat`, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message }),
   });
+  if (resp.status === 401) {
+    const err = new Error('Not authenticated');
+    (err as Error & { status?: number }).status = 401;
+    throw err;
+  }
   if (!resp.ok) {
     let detail = `${resp.status} /llm/chat`;
     try {
@@ -101,7 +113,7 @@ export async function loadDashboard() {
   const me = await fetchJson<{ id: string }>('/users/me');
 
   const [bankAccounts, rawTxs, rawSheet, rawKpis] = await Promise.all([
-    fetchJson<Array<{ id: string; name: string; iban: string | null; currency: string; current_balance: number; include_in_household?: boolean }>>(
+    fetchJson<Array<{ id: string; name: string; iban: string | null; currency: string; current_balance: number; include_in_household?: boolean; is_depot?: boolean }>>(
       '/banking/accounts'
     ),
     fetchJson<Array<Record<string, unknown>>>(`/transactions/?limit=500`),
@@ -122,6 +134,7 @@ export async function loadDashboard() {
     current_balance: num(acc.current_balance),
     is_active: true,
     include_in_household: acc.include_in_household !== false,
+    is_depot: acc.is_depot === true,
   }));
 
   const accountNameById = Object.fromEntries(accounts.map((a) => [a.id, a.name]));

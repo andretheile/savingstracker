@@ -85,6 +85,33 @@ async def ensure_schema() -> None:
                     "BOOLEAN DEFAULT 1 NOT NULL"
                 )
             )
+        if acc_cols and "is_depot" not in acc_cols:
+            await conn.execute(
+                text(
+                    "ALTER TABLE accounts ADD COLUMN is_depot "
+                    "BOOLEAN DEFAULT 0 NOT NULL"
+                )
+            )
+
+        bank_cols = await conn.run_sync(lambda c: column_names(c, "bank_connections"))
+        if bank_cols and "pin_encrypted" not in bank_cols:
+            await conn.execute(
+                text("ALTER TABLE bank_connections ADD COLUMN pin_encrypted TEXT")
+            )
+
+        user_cols = await conn.run_sync(lambda c: column_names(c, "users"))
+        user_alters = {
+            "telegram_bot_token_encrypted": "TEXT",
+            "telegram_bot_username": "VARCHAR(255)",
+            "telegram_bot_name": "VARCHAR(255)",
+            "telegram_allowed_user_ids": "VARCHAR(512) DEFAULT '' NOT NULL",
+            "telegram_allowed_chat_ids": "VARCHAR(512) DEFAULT '' NOT NULL",
+            "openrouter_api_key_encrypted": "TEXT",
+            "openrouter_model": "VARCHAR(128)",
+        }
+        for col, ddl in user_alters.items():
+            if user_cols and col not in user_cols:
+                await conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {ddl}"))
 
 
 async def dispose_engine() -> None:

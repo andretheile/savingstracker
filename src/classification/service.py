@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 IBAN_RE = re.compile(r"DE[0-9]{20}", re.IGNORECASE)
 
 TRANSFER_CATEGORY = "Internal Transfer"
+DEPOT_CATEGORY = "Depot Transfer"
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,11 @@ class BuiltinRule:
 BUILTIN_RULES: list[BuiltinRule] = [
     BuiltinRule("Rent & Housing", r"win-win|miete|wohnung|betriebskosten|hausgeld|kaltmiete", 10),
     BuiltinRule("Salary", r"gehalt|lohnabrechnung|\bsalary\b", 15),
+    BuiltinRule(
+        "Depot Transfer",
+        r"wertpapierdepot|depotübertrag|dkb.?depot|\bdepotkonto\b|\bdepot\b",
+        18,
+    ),
     BuiltinRule("Insurance", r"huk-?24|huk-?coburg|versicherung|\badac\b", 20),
     BuiltinRule("Utilities", r"e\.on|stadtwerke|\bstrom\b|telekom|vodafone|\bo2\b", 20),
     BuiltinRule("Subscriptions", r"openai|cursor|netflix|spotify|adobe|apple\.com/bill", 20),
@@ -101,6 +107,20 @@ def is_internal_transfer(
     return bool(name) and any(token in name for token in own_names)
 
 
+def is_depot_leg(
+    tx: Transaction,
+    depot_ibans: set[str],
+    source_iban: str,
+) -> bool:
+    """True when this booking is to or from a marked depot account."""
+    if not depot_ibans:
+        return False
+    if source_iban in depot_ibans:
+        return True
+    mentioned = extract_ibans(tx.counterparty, tx.description, tx.reference)
+    return bool(mentioned & depot_ibans)
+
+
 def is_cashflow_relevant(
     tx: Transaction,
     category: Category | None,
@@ -145,6 +165,7 @@ async def classify_transaction(
     source_iban: str | None = None,
     own_names: set[str] | None = None,
     categories_by_name: dict[str, Category] | None = None,
+    depot_ibans: set[str] | None = None,
 ) -> uuid.UUID | None:
     """Classify a transaction using transfers, user rules, then built-in merchant rules.
 
@@ -153,14 +174,21 @@ async def classify_transaction(
     if tx.is_manually_classified and tx.category_id is not None:
         return tx.category_id
 
+    loaded_depot: set[str] = set()
     if own_ibans is None or source_iban is None:
-        own_ibans, iban_by_account = await _own_ibans(session, user_id)
+        own_ibans, iban_by_account, loaded_depot = await _own_ibans(session, user_id)
         source_iban = iban_by_account.get(tx.account_id, "")
+    if depot_ibans is None:
+        depot_ibans = loaded_depot
 
     if categories_by_name is None:
         categories_by_name = await _system_categories(session)
 
     if is_internal_transfer(tx, own_ibans, source_iban, own_names):
+        if is_depot_leg(tx, depot_ibans, source_iban):
+            depot = categories_by_name.get(DEPOT_CATEGORY)
+            if depot is not None:
+                return depot.id
         transfer = categories_by_name.get(TRANSFER_CATEGORY)
         if transfer is not None:
             return transfer.id
@@ -230,7 +258,7 @@ async def classify_batch(
     user_id: uuid.UUID,
 ) -> dict[uuid.UUID, uuid.UUID | None]:
     """Classify a batch of transactions. Returns {tx.id: category_id}."""
-    own_ibans, iban_by_account = await _own_ibans(session, user_id)
+    own_ibans, iban_by_account, depot_ibans = await _own_ibans(session, user_id)
     categories_by_name = await _system_categories(session)
     own_names = collect_own_holder_names(transactions, own_ibans)
     results: dict[uuid.UUID, uuid.UUID | None] = {}
@@ -243,13 +271,14 @@ async def classify_batch(
             source_iban=iban_by_account.get(tx.account_id, ""),
             own_names=own_names,
             categories_by_name=categories_by_name,
+            depot_ibans=depot_ibans,
         )
     return results
 
 
 async def reclassify_user_transactions(session: AsyncSession, user_id: uuid.UUID) -> int:
     """Apply auto-classification to all non-manual transactions for a user."""
-    own_ibans, iban_by_account = await _own_ibans(session, user_id)
+    own_ibans, iban_by_account, depot_ibans = await _own_ibans(session, user_id)
     if not iban_by_account:
         stmt_acc = select(Account.id).where(Account.user_id == user_id)
         account_ids = list((await session.execute(stmt_acc)).scalars().all())
@@ -274,6 +303,7 @@ async def reclassify_user_transactions(session: AsyncSession, user_id: uuid.UUID
             source_iban=source_iban,
             own_names=own_names,
             categories_by_name=categories_by_name,
+            depot_ibans=depot_ibans,
         )
         changed = False
         if matched is not None and tx.category_id != matched:
@@ -301,19 +331,22 @@ async def reclassify_all_users(session: AsyncSession) -> int:
 
 async def _own_ibans(
     session: AsyncSession, user_id: uuid.UUID
-) -> tuple[set[str], dict[uuid.UUID, str]]:
+) -> tuple[set[str], dict[uuid.UUID, str], set[str]]:
     stmt = select(Account).where(Account.user_id == user_id, Account.is_active.is_(True))
     accounts = list((await session.execute(stmt)).scalars().all())
     iban_by_account: dict[uuid.UUID, str] = {}
     own: set[str] = set()
+    depot: set[str] = set()
     for acc in accounts:
         iban = normalize_iban(acc.iban)
         if iban:
             own.add(iban)
             iban_by_account[acc.id] = iban
+            if acc.is_depot:
+                depot.add(iban)
         else:
             iban_by_account[acc.id] = ""
-    return own, iban_by_account
+    return own, iban_by_account, depot
 
 
 async def _system_categories(session: AsyncSession) -> dict[str, Category]:
@@ -347,8 +380,9 @@ DEFAULT_CATEGORIES = [
     {"name": "Taxes & Fees", "direction": "expense", "icon": "🧾", "sort_order": 24},
     {"name": "Cash", "direction": "expense", "icon": "💶", "sort_order": 25},
     {"name": "Other Expense", "direction": "expense", "icon": "❓", "sort_order": 99},
-    {"name": "Savings & Investments", "direction": "transfer", "icon": "📈", "sort_order": 30},
-    {"name": "Internal Transfer", "direction": "transfer", "icon": "🔄", "sort_order": 31},
+    {"name": "Depot Transfer", "direction": "transfer", "icon": "🏦", "sort_order": 30},
+    {"name": "Savings & Investments", "direction": "transfer", "icon": "📈", "sort_order": 31},
+    {"name": "Internal Transfer", "direction": "transfer", "icon": "🔄", "sort_order": 32},
 ]
 
 

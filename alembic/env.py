@@ -10,6 +10,7 @@ from src.config import settings
 from src.core.base_model import Base
 # Import all models to ensure they are registered on Base.metadata
 import src.users.models  # noqa
+import src.auth.models  # noqa
 import src.accounts.models  # noqa
 import src.banking.models  # noqa
 import src.transactions.models  # noqa

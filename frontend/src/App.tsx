@@ -8,6 +8,7 @@ import { BankingHub } from './components/BankingHub';
 import { TransactionsTable } from './components/TransactionsTable';
 import { TelegramStatusCard } from './components/TelegramStatusCard';
 import { ChatView } from './components/ChatView';
+import { HouseholdMembersCard } from './components/HouseholdMembersCard';
 import { fetchJson, loadDashboard } from './api';
 import type { Account, BalanceSheetData, KPISnapshot, Transaction } from './types';
 
@@ -33,7 +34,20 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id'] | 'settings';
 
+function loginHref() {
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost' && window.location.port !== '8000') {
+    return 'http://localhost:8000/login';
+  }
+  return '/login';
+}
+
+function isUnauthorized(err: unknown) {
+  return err instanceof Error && (err as Error & { status?: number }).status === 401;
+}
+
 export function App() {
+  const [authEmail, setAuthEmail] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [kpis, setKpis] = useState<KPISnapshot[]>([]);
@@ -45,6 +59,8 @@ export function App() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
 
   const refresh = useCallback(async () => {
+    const me = await fetchJson<{ email: string }>('/auth/me');
+    setAuthEmail(me.email);
     const data = await loadDashboard();
     setUserId(data.userId);
     setAccounts(data.accounts);
@@ -55,8 +71,26 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    refresh().catch((err) => console.error('Failed to load dashboard', err));
+    refresh()
+      .catch((err) => {
+        if (isUnauthorized(err)) {
+          setAuthEmail(null);
+        } else {
+          console.error('Failed to load dashboard', err);
+        }
+      })
+      .finally(() => setAuthReady(true));
   }, [refresh]);
+
+  const handleLogout = async () => {
+    try {
+      await fetchJson('/auth/logout', { method: 'POST' });
+    } catch {
+      /* still show the login screen */
+    }
+    setAuthEmail(null);
+    setUserId(null);
+  };
 
   const handleSyncBank = async () => {
     setIsSyncing(true);
@@ -126,6 +160,31 @@ export function App() {
   const monthlyIncome = balanceSheet.total_income;
   const monthlySavings = Math.max(0, balanceSheet.net_cashflow);
 
+  if (!authReady) {
+    return (
+      <div className="min-h-screen bg-[#F6F4EF] text-[#1A1714] flex items-center justify-center font-sans">
+        <p className="text-xs text-[#8A8278]">Loading…</p>
+      </div>
+    );
+  }
+
+  if (!authEmail) {
+    return (
+      <div className="min-h-screen bg-[#F6F4EF] text-[#1A1714] flex items-center justify-center font-sans px-6">
+        <div className="cream-panel max-w-md w-full p-8 text-center">
+          <h1 className="text-xl font-semibold font-heading">SavingsTracker</h1>
+          <p className="text-xs text-[#6B645A] mt-2">
+            Sign in with Google to open your household dashboard. A new account starts empty;
+            an invite from Settings joins an existing household.
+          </p>
+          <a href={loginHref()} className="gold-button-primary inline-flex mt-6 text-sm px-5 py-2.5">
+            Continue with Google
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#F6F4EF] text-[#1A1714] flex flex-col font-sans">
       <div className="sticky top-0 z-40 bg-[#F6F4EF]/90 backdrop-blur-md border-b border-[#E5DFD4]">
@@ -135,10 +194,12 @@ export function App() {
             onOpenNewTx={() => setActiveTab('transactions')}
             onOpenNewKpi={() => setActiveTab('kpis')}
             onOpenSettings={() => setActiveTab('settings')}
+            onLogout={handleLogout}
             settingsActive={activeTab === 'settings'}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
             isSyncing={isSyncing}
+            userEmail={authEmail}
           />
 
           <nav className="nav-scroll flex items-center gap-7">
@@ -181,9 +242,10 @@ export function App() {
             <div className="mb-5">
               <h2 className="text-lg font-semibold text-[#1A1714] font-heading">Settings</h2>
               <p className="text-xs text-[#6B645A] mt-0.5">
-                Telegram digest and OpenRouter chat.
+                Household members, Telegram bot, and OpenRouter key for this dashboard.
               </p>
             </div>
+            <HouseholdMembersCard />
             <TelegramStatusCard />
           </div>
         )}

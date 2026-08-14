@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.accounts.models import Account
 from src.accounts.service import create_account, get_account_balance, list_user_accounts
+from src.auth.dependencies import CurrentUser, require_same_household
+from src.classification.service import reclassify_user_transactions
 from src.core.dependencies import get_db
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -32,6 +34,7 @@ class AccountResponse(BaseModel):
     initial_balance: float
     is_active: bool
     include_in_household: bool = True
+    is_depot: bool = False
 
     class Config:
         from_attributes = True
@@ -44,8 +47,10 @@ class AccountBalanceResponse(AccountResponse):
 @router.post("/", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
 async def api_create_account(
     data: AccountCreate,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_same_household(data.user_id, user)
     acc = await create_account(
         db,
         user_id=data.user_id,
@@ -60,12 +65,13 @@ async def api_create_account(
 @router.get("/{account_id}", response_model=AccountBalanceResponse)
 async def api_get_account(
     account_id: uuid.UUID,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Account).where(Account.id == account_id, Account.is_active.is_(True))
     result = await db.execute(stmt)
     acc = result.scalar_one_or_none()
-    if not acc:
+    if not acc or acc.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
 
     bal = await get_account_balance(db, acc.id)
@@ -78,6 +84,7 @@ async def api_get_account(
         initial_balance=float(acc.initial_balance),
         is_active=acc.is_active,
         include_in_household=bool(acc.include_in_household),
+        is_depot=bool(acc.is_depot),
         current_balance=bal,
     )
 
@@ -85,8 +92,10 @@ async def api_get_account(
 @router.get("/user/{user_id}", response_model=list[AccountBalanceResponse])
 async def api_list_accounts(
     user_id: uuid.UUID,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_same_household(user_id, user)
     accounts = await list_user_accounts(db, user_id)
     response = []
     for acc in accounts:
@@ -100,6 +109,7 @@ async def api_list_accounts(
             initial_balance=float(acc.initial_balance),
             is_active=acc.is_active,
             include_in_household=bool(acc.include_in_household),
+            is_depot=bool(acc.is_depot),
             current_balance=bal,
         )
         response.append(item)
@@ -110,16 +120,38 @@ class AccountHouseholdUpdate(BaseModel):
     include_in_household: bool
 
 
+class AccountDepotUpdate(BaseModel):
+    is_depot: bool
+
+
 @router.patch("/{account_id}/household", response_model=AccountResponse)
 async def api_set_account_household(
     account_id: uuid.UUID,
     data: AccountHouseholdUpdate,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Account).where(Account.id == account_id)
     acc = (await db.execute(stmt)).scalar_one_or_none()
-    if not acc:
+    if not acc or acc.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
     acc.include_in_household = data.include_in_household
     await db.flush()
+    return acc
+
+
+@router.patch("/{account_id}/depot", response_model=AccountResponse)
+async def api_set_account_depot(
+    account_id: uuid.UUID,
+    data: AccountDepotUpdate,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(Account).where(Account.id == account_id)
+    acc = (await db.execute(stmt)).scalar_one_or_none()
+    if not acc or acc.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    acc.is_depot = data.is_depot
+    await db.flush()
+    await reclassify_user_transactions(db, acc.user_id)
     return acc

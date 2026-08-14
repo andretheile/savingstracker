@@ -10,9 +10,8 @@ RUN npm run build
 # ── Python deps ────────────────────────────────────────────
 FROM python:3.12-slim AS builder
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-
 WORKDIR /app
+RUN pip install --no-cache-dir uv
 COPY pyproject.toml ./
 
 RUN uv venv /app/.venv && \

@@ -76,17 +76,22 @@ async def add_transaction(
 
 async def list_transactions(
     session: AsyncSession,
+    user_id: uuid.UUID | None = None,
     account_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
     limit: int = 500,
 ) -> Sequence[Transaction]:
-    """Query transactions with optional filtering."""
+    """Query transactions with optional filtering, scoped to a household when user_id is set."""
+    from src.accounts.models import Account
+
     stmt = select(Transaction).options(
         selectinload(Transaction.account),
         selectinload(Transaction.category),
     )
+    if user_id is not None:
+        stmt = stmt.join(Account, Transaction.account_id == Account.id).where(Account.user_id == user_id)
     if account_id:
         stmt = stmt.where(Transaction.account_id == account_id)
     if category_id:

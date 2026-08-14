@@ -25,6 +25,7 @@ class BankConnection(UUIDMixin, TimestampMixin, Base):
     login_name: Mapped[str] = mapped_column(
         String(512), nullable=False
     )  # Encrypted at application layer
+    pin_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     adapter_type: Mapped[str] = mapped_column(
         String(32), nullable=False, default="fints"
     )  # fints | csv

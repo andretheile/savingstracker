@@ -18,7 +18,7 @@ async def kpis_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not update.effective_user or not update.effective_message:
         return
 
-    user = await require_linked_user(update)
+    user = await require_linked_user(update, context)
     if user is None:
         return
 
@@ -80,7 +80,7 @@ async def newkpi_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
 
-    user = await require_linked_user(update)
+    user = await require_linked_user(update, context)
     if user is None:
         return
 

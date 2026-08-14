@@ -16,7 +16,7 @@ async def balance_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not update.effective_user or not update.effective_message:
         return
 
-    user = await require_linked_user(update)
+    user = await require_linked_user(update, context)
     if user is None:
         return
 

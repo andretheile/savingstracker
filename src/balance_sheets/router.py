@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.auth.dependencies import CurrentUser, require_same_household
 from src.balance_sheets.service import generate_balance_sheet
 from src.core.dependencies import get_db
 
@@ -37,8 +38,10 @@ async def get_balance_sheet(
     user_id: uuid.UUID,
     period_start: date,
     period_end: date,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_same_household(user_id, user)
     bs = await generate_balance_sheet(db, user_id, period_start, period_end)
     return BalanceSheetResponse(
         period_start=bs.period_start,

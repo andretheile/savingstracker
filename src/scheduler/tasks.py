@@ -8,7 +8,6 @@ from datetime import UTC, date, datetime
 from telegram import Bot
 
 from src.celery_app import celery_app
-from src.config import settings
 from src.core.database import get_standalone_session
 from src.scheduler.models import MonthlyReport
 from src.scheduler.monthly_report import build_monthly_report_payload
@@ -63,19 +62,27 @@ def generate_user_monthly_report(self, user_id_str: str):
             from src.users.service import get_user_by_id
             user = await get_user_by_id(session, user_id)
 
-            if user and user.telegram_id and settings.telegram_bot_token:
-                try:
-                    bot = Bot(token=settings.telegram_bot_token)
-                    await bot.send_message(
-                        chat_id=user.telegram_id,
-                        text=text_msg,
-                        parse_mode="Markdown",
-                    )
-                    report.sent_via_telegram = True
-                    report.sent_at = datetime.now(UTC)
-                    logger.info("Sent monthly report to Telegram user %d", user.telegram_id)
-                except Exception as e:
-                    logger.error("Failed to send Telegram message to user %d: %s", user.telegram_id, e)
+            if user and user.telegram_id:
+                from src.users.credentials import telegram_token_for_user
+
+                token = telegram_token_for_user(user)
+                if token:
+                    try:
+                        bot = Bot(token=token)
+                        await bot.send_message(
+                            chat_id=user.telegram_id,
+                            text=text_msg,
+                            parse_mode="Markdown",
+                        )
+                        report.sent_via_telegram = True
+                        report.sent_at = datetime.now(UTC)
+                        logger.info("Sent monthly report to Telegram user %d", user.telegram_id)
+                    except Exception as e:
+                        logger.error(
+                            "Failed to send Telegram message to user %d: %s",
+                            user.telegram_id,
+                            e,
+                        )
 
             await session.flush()
 

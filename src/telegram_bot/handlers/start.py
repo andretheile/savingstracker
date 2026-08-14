@@ -57,6 +57,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "• /balance — Income vs expenses\n"
         "• /projection — Long-term savings projection\n"
         "• /newkpi — Add a custom KPI formula\n"
+        "• /sync — Refresh live bank data (approve in the DKB app, then /syncconfirm)\n"
         "• /reset — Clear chat history\n"
         "• /help — Command list\n"
     )
@@ -81,6 +82,8 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/newkpi — Custom metric formula\n"
         "/projection — 20-year growth scenarios\n"
         "/balance — This month's income vs expenses\n"
+        "/sync — Refresh live bank data\n"
+        "/syncconfirm — Finish sync after DKB app approval\n"
         "/reset — Clear chat history\n\n"
         "Or just type a question in a private chat. Groups only work if their "
         "chat id is on TELEGRAM_ALLOWED_CHAT_IDS; @mention the bot or reply to it. "

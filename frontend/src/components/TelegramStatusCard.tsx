@@ -310,7 +310,7 @@ export const TelegramStatusCard: React.FC = () => {
                 <a href="https://openrouter.ai/keys" className="text-[#8F7848] underline" target="_blank" rel="noreferrer">
                   openrouter.ai/keys
                 </a>
-                . It is stored in the local .env file.
+                . It is stored for this household only.
               </p>
             </form>
           </div>

@@ -4,6 +4,7 @@ import uuid
 from datetime import date
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import src.accounts.models  # noqa
@@ -238,4 +239,132 @@ async def test_builtin_rules_transfers_and_exclude(async_session: AsyncSession):
     )
     assert float(bs_hh.total_income) == pytest.approx(3600.0)
     assert float(bs_hh.total_expense) == pytest.approx(18.26)
+
+
+@pytest.mark.asyncio
+async def test_depot_transfer_category_and_cashflow(async_session: AsyncSession):
+    from src.accounts.service import create_account
+    from src.balance_sheets.service import generate_balance_sheet
+    from src.classification.models import Category
+    from src.transactions.service import add_transaction
+    from src.users.service import get_or_create_user_by_telegram_id
+
+    user = await get_or_create_user_by_telegram_id(async_session, 434343, "Andre")
+    await seed_default_categories(async_session)
+    giro = await create_account(
+        async_session, user.id, "Joint Giro", iban="DE36120300001205941121"
+    )
+    depot = await create_account(
+        async_session, user.id, "DKB Depot", iban="DE36120300009999999999"
+    )
+    depot.is_depot = True
+    await create_account(
+        async_session, user.id, "Personal Giro", iban="DE36120300001085715538"
+    )
+    await async_session.flush()
+
+    cats = {
+        c.name: c
+        for c in (await async_session.execute(select(Category))).scalars().all()
+    }
+
+    to_depot = await add_transaction(
+        async_session,
+        user_id=user.id,
+        account_id=giro.id,
+        tx_date=date(2026, 8, 9),
+        amount=-500.0,
+        description="Sparrate",
+        counterparty="DE36120300009999999999Andre Theile",
+    )
+    from_depot = await add_transaction(
+        async_session,
+        user_id=user.id,
+        account_id=giro.id,
+        tx_date=date(2026, 8, 10),
+        amount=200.0,
+        description="Depotauszahlung",
+        counterparty="DE36120300009999999999Andre Theile",
+    )
+    between_giros = await add_transaction(
+        async_session,
+        user_id=user.id,
+        account_id=giro.id,
+        tx_date=date(2026, 8, 11),
+        amount=-50.0,
+        description="Ausgleich",
+        counterparty="DE36120300001085715538Andre Theile",
+    )
+    keyword = await add_transaction(
+        async_session,
+        user_id=user.id,
+        account_id=giro.id,
+        tx_date=date(2026, 8, 12),
+        amount=-80.0,
+        description="Übertrag auf DKB Depot",
+        counterparty="DKB AG",
+    )
+
+    assert to_depot.category_id == cats["Depot Transfer"].id
+    assert from_depot.category_id == cats["Depot Transfer"].id
+    assert between_giros.category_id == cats["Internal Transfer"].id
+    assert keyword.category_id == cats["Depot Transfer"].id
+
+    grocery = await add_transaction(
+        async_session,
+        user_id=user.id,
+        account_id=giro.id,
+        tx_date=date(2026, 8, 13),
+        amount=-18.26,
+        description="REWE Einkauf",
+        counterparty="REWE",
+    )
+    assert grocery.category_id == cats["Groceries"].id
+
+    bs = await generate_balance_sheet(
+        async_session, user.id, date(2026, 8, 1), date(2026, 8, 31)
+    )
+    assert float(bs.total_expense) == pytest.approx(18.26)
+    assert float(bs.total_income) == 0.0
+
+
+@pytest.mark.asyncio
+async def test_depot_iban_registered_before_account_sync(async_session: AsyncSession):
+    from src.accounts.service import create_account
+    from src.classification.models import Category
+    from src.classification.service import reclassify_user_transactions
+    from src.transactions.service import add_transaction
+    from src.users.service import get_or_create_user_by_telegram_id
+
+    user = await get_or_create_user_by_telegram_id(async_session, 454545, "Andre")
+    await seed_default_categories(async_session)
+    giro = await create_account(
+        async_session, user.id, "Joint Giro", iban="DE36120300001205941121"
+    )
+    depot_iban = "DE36120300008888888888"
+    pending = await add_transaction(
+        async_session,
+        user_id=user.id,
+        account_id=giro.id,
+        tx_date=date(2026, 8, 12),
+        amount=-300.0,
+        description="Erste Sparrate",
+        counterparty=f"{depot_iban}Andre Theile",
+    )
+    cats = {
+        c.name: c
+        for c in (await async_session.execute(select(Category))).scalars().all()
+    }
+    assert pending.category_id != cats["Depot Transfer"].id
+
+    await create_account(
+        async_session,
+        user.id,
+        "DKB Depot",
+        iban=depot_iban,
+        is_depot=True,
+    )
+    await reclassify_user_transactions(async_session, user.id)
+    await async_session.refresh(pending)
+    assert pending.category_id == cats["Depot Transfer"].id
 

@@ -18,8 +18,10 @@ async def chat_completion(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
     model: str | None = None,
+    api_key: str | None = None,
 ) -> dict[str, Any]:
-    if not settings.openrouter_api_key:
+    key = api_key or settings.openrouter_api_key
+    if not key:
         raise RuntimeError("OPENROUTER_API_KEY is not set")
 
     payload: dict[str, Any] = {
@@ -36,7 +38,7 @@ async def chat_completion(
         response = await client.post(
             OPENROUTER_URL,
             headers={
-                "Authorization": f"Bearer {settings.openrouter_api_key}",
+                "Authorization": f"Bearer {key}",
                 "HTTP-Referer": "https://savingstracker.local",
                 "X-Title": "SavingsTracker",
             },

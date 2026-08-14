@@ -28,6 +28,7 @@ from src.telegram_bot.handlers.common import parse_id_set
 from src.telegram_bot.handlers.kpis import kpis_handler, newkpi_handler
 from src.telegram_bot.handlers.projections import projection_handler
 from src.telegram_bot.handlers.start import help_handler, start_handler
+from src.telegram_bot.handlers.sync import format_sync_result, sync_handler, syncconfirm_handler
 from src.users.service import get_or_create_user_by_telegram_id
 
 
@@ -99,6 +100,47 @@ async def test_telegram_all_handlers(async_session: AsyncSession):
         assert reply_mock.called
 
 
+def test_format_sync_result_copy():
+    assert "banking app" in format_sync_result({"status": "needs_approval", "bank": "DKB"}).lower()
+    assert "pin is not stored" in format_sync_result({"status": "missing_pin"}).lower()
+    assert "no bank is linked" in format_sync_result({"status": "no_connection"}).lower()
+
+
+@pytest.mark.asyncio
+async def test_sync_handlers(async_session: AsyncSession):
+    user = await get_or_create_user_by_telegram_id(async_session, 999111, "Bot User")
+    update = MagicMock()
+    update.effective_user = MagicMock()
+    update.effective_user.id = 999111
+    reply_mock = AsyncMock()
+    update.effective_message = MagicMock()
+    update.effective_message.reply_text = reply_mock
+    context = MagicMock()
+
+    @asynccontextmanager
+    async def mock_standalone():
+        yield async_session
+
+    with (
+        patch("src.telegram_bot.handlers.sync.require_linked_user", AsyncMock(return_value=user)),
+        patch("src.telegram_bot.handlers.sync.get_standalone_session", side_effect=mock_standalone),
+        patch(
+            "src.telegram_bot.handlers.sync.start_household_sync",
+            AsyncMock(return_value={"status": "needs_approval", "bank": "DKB"}),
+        ),
+        patch(
+            "src.telegram_bot.handlers.sync.confirm_household_sync",
+            AsyncMock(return_value={"status": "synced", "message": "Sync completed."}),
+        ),
+    ):
+        await sync_handler(update, context)
+        await syncconfirm_handler(update, context)
+    texts = [call.args[0] for call in reply_mock.await_args_list]
+    assert any("Connecting to the bank" in t for t in texts)
+    assert any("banking app" in t.lower() for t in texts)
+    assert any("Sync completed" in t for t in texts)
+
+
 def test_parse_id_set():
     assert parse_id_set("") == frozenset()
     assert parse_id_set("  ") == frozenset()
@@ -132,7 +174,7 @@ async def test_unlinked_private_chat_is_denied(async_session: AsyncSession):
             side_effect=mock_standalone,
         ),
         patch("src.telegram_bot.handlers.chat.run_agent", run_agent),
-        patch("src.telegram_bot.handlers.chat.settings.openrouter_api_key", "sk-test"),
+        patch("src.users.credentials.settings.openrouter_api_key", "sk-test"),
     ):
         await chat_handler(update, MagicMock())
 

@@ -16,10 +16,15 @@ import src.users.models  # noqa
 from src.banking.adapters.base import AuthResult, BankAccountInfo, RawTransaction
 from src.banking.adapters.fints_adapter import FinTSAdapter
 from src.banking.service import (
+    clear_pending_syncs,
     complete_tan_sync,
+    confirm_household_sync,
+    connection_pin,
     create_bank_connection,
     import_since_date,
+    start_household_sync,
     sync_bank_connection,
+    upsert_bank_connection,
 )
 from src.core.base_model import Base
 from src.users.service import get_or_create_user_by_telegram_id
@@ -106,6 +111,7 @@ async def test_create_and_sync_bank_connection(async_session: AsyncSession):
     with patch("src.banking.service.FinTSAdapter", return_value=mock_adapter_tan):
         ok_tan_c, msg_tan_c = await complete_tan_sync(async_session, conn.id, {"client": MagicMock()}, "999999")
         assert ok_tan_c is True
+        assert "new transactions" in msg_tan_c
 
 
 @pytest.mark.asyncio
@@ -206,3 +212,66 @@ def test_submit_tan_polls_decoupled_until_confirmed():
 
     assert client.send_tan.call_count == 3
     client.send_tan.assert_called_with(pending, "")
+
+
+@pytest.mark.asyncio
+async def test_stored_pin_and_household_sync_flow(async_session: AsyncSession):
+    clear_pending_syncs()
+    user = await get_or_create_user_by_telegram_id(async_session, 111222, "Pin User")
+    conn = await create_bank_connection(
+        session=async_session,
+        user_id=user.id,
+        bank_blz="12030000",
+        bank_name="DKB",
+        fints_url="https://fints.example.com",
+        login_name="user123",
+        pin="secret-pin",
+    )
+    assert connection_pin(conn) == "secret-pin"
+
+    same = await upsert_bank_connection(
+        async_session,
+        user_id=user.id,
+        bank_blz="12030000",
+        bank_name="DKB",
+        fints_url="https://fints.example.com",
+        login_name="user123",
+        pin="new-pin",
+    )
+    assert same.id == conn.id
+    assert connection_pin(same) == "new-pin"
+
+    assert (await start_household_sync(async_session, uuid.uuid4()))["status"] == "no_connection"
+
+    lonely = await get_or_create_user_by_telegram_id(async_session, 333444, "No Pin")
+    await create_bank_connection(
+        session=async_session,
+        user_id=lonely.id,
+        bank_blz="12030000",
+        bank_name="DKB",
+        fints_url="https://fints.example.com",
+        login_name="nopin",
+    )
+    assert (await start_household_sync(async_session, lonely.id))["status"] == "missing_pin"
+
+    mock_adapter = AsyncMock()
+    mock_adapter.connect.return_value = AuthResult(
+        success=True, requires_tan=True, session_data={"client": MagicMock()}
+    )
+    with patch("src.banking.service.FinTSAdapter", return_value=mock_adapter), patch(
+        "src.banking.service.rate_limit_check", return_value=True
+    ):
+        waiting = await start_household_sync(async_session, user.id)
+    assert waiting["status"] == "needs_approval"
+    assert mock_adapter.connect.await_args.args[3] == "new-pin"
+
+    mock_adapter.handle_tan.return_value = AuthResult(
+        success=True, session_data={"client": MagicMock()}
+    )
+    mock_adapter.fetch_accounts.return_value = []
+    mock_adapter.fetch_transactions.return_value = []
+    with patch("src.banking.service.FinTSAdapter", return_value=mock_adapter):
+        done = await confirm_household_sync(async_session, user.id)
+    assert done["status"] == "synced"
+    assert (await confirm_household_sync(async_session, user.id))["status"] == "idle"
+    clear_pending_syncs()

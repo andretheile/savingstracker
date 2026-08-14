@@ -7,15 +7,18 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import src.accounts.models  # noqa
+import src.auth.models  # noqa
 import src.banking.models  # noqa
 import src.classification.models  # noqa
 import src.kpis.models  # noqa
 import src.projections.models  # noqa
 import src.transactions.models  # noqa
 import src.users.models  # noqa
+from src.auth.dependencies import get_current_user
 from src.core.base_model import Base
 from src.core.dependencies import get_db
 from src.main import app
+from src.users.service import get_or_create_default_user
 
 
 @pytest.fixture
@@ -30,11 +33,22 @@ async def async_session():
 
 
 @pytest.fixture
-async def client(async_session: AsyncSession):
+async def household_user(async_session: AsyncSession):
+    user = await get_or_create_default_user(async_session)
+    await async_session.commit()
+    return user
+
+
+@pytest.fixture
+async def client(async_session: AsyncSession, household_user):
     async def _override_get_db():
         yield async_session
 
+    async def _override_user():
+        return household_user
+
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_current_user] = _override_user
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac
@@ -58,33 +72,21 @@ async def test_telegram_status_unlinked(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_users_router(client: AsyncClient):
-    # Create user
-    res = await client.post("/api/users/", json={"name": "API User", "telegram_id": 99887766})
-    assert res.status_code == 201
-    data = res.json()
-    user_id = data["id"]
-    assert data["name"] == "API User"
+async def test_users_router(client: AsyncClient, household_user):
+    res_me = await client.get("/api/users/me")
+    assert res_me.status_code == 200
+    assert res_me.json()["id"] == str(household_user.id)
 
-    # Get user
-    res_get = await client.get(f"/api/users/{user_id}")
-    assert res_get.status_code == 200
-    assert res_get.json()["id"] == user_id
+    res_forbidden = await client.post("/api/users/", json={"name": "API User", "telegram_id": 99887766})
+    assert res_forbidden.status_code == 403
 
-    # Get non-existent user
-    res_404 = await client.get(f"/api/users/{uuid.uuid4()}")
-    assert res_404.status_code == 404
-
-    # Create without telegram_id -> 400
-    res_bad = await client.post("/api/users/", json={"name": "No TG"})
-    assert res_bad.status_code == 400
+    res_other = await client.get(f"/api/users/{uuid.uuid4()}")
+    assert res_other.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_accounts_router(client: AsyncClient):
-    # First create user
-    u_res = await client.post("/api/users/", json={"name": "Acc User", "telegram_id": 11223344})
-    user_id = u_res.json()["id"]
+async def test_accounts_router(client: AsyncClient, household_user):
+    user_id = str(household_user.id)
 
     # Create account
     res = await client.post("/api/accounts/", json={
@@ -114,10 +116,8 @@ async def test_accounts_router(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_transactions_router(client: AsyncClient):
-    # Setup user and account
-    u_res = await client.post("/api/users/", json={"name": "Tx User", "telegram_id": 55667788})
-    user_id = u_res.json()["id"]
+async def test_transactions_router(client: AsyncClient, household_user):
+    user_id = str(household_user.id)
     a_res = await client.post("/api/accounts/", json={"user_id": str(user_id), "name": "Main", "initial_balance": 500.0})
     acc_id = a_res.json()["id"]
 
@@ -146,10 +146,8 @@ async def test_transactions_router(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_kpis_and_projections_and_balance_sheets_routers(client: AsyncClient):
-    # Setup user & account & transactions
-    u_res = await client.post("/api/users/", json={"name": "Full Flow User", "telegram_id": 33445566})
-    user_id = u_res.json()["id"]
+async def test_kpis_and_projections_and_balance_sheets_routers(client: AsyncClient, household_user):
+    user_id = str(household_user.id)
     a_res = await client.post("/api/accounts/", json={"user_id": str(user_id), "name": "Depot", "initial_balance": 10000.0})
     acc_id = a_res.json()["id"]
 
@@ -222,3 +220,32 @@ async def test_kpis_and_projections_and_balance_sheets_routers(client: AsyncClie
     assert float(bs_data["total_income"]) == 4000.0
     assert float(bs_data["total_expense"]) == 1500.0
     assert float(bs_data["net_cashflow"]) == 2500.0
+
+
+@pytest.mark.asyncio
+async def test_register_depot_iban(client: AsyncClient):
+    bad = await client.post("/api/banking/depot", json={"iban": "not-an-iban"})
+    assert bad.status_code == 400
+
+    res = await client.post(
+        "/api/banking/depot",
+        json={"name": "DKB Depot", "iban": "DE36 1203 0000 8888 8888 88"},
+    )
+    assert res.status_code == 201
+    data = res.json()
+    assert data["is_depot"] is True
+    assert data["include_in_household"] is False
+    assert data["iban"] == "DE36120300008888888888"
+    assert data["name"] == "DKB Depot"
+
+    again = await client.post(
+        "/api/banking/depot",
+        json={"name": "DKB Depot", "iban": "DE36120300008888888888"},
+    )
+    assert again.status_code == 201
+    assert again.json()["id"] == data["id"]
+
+    listed = await client.get("/api/banking/accounts")
+    assert listed.status_code == 200
+    depots = [acc for acc in listed.json() if acc["is_depot"]]
+    assert len(depots) == 1

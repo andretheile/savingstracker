@@ -28,6 +28,7 @@ class Account(UUIDMixin, TimestampMixin, Base):
     include_in_household: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False
     )
+    is_depot: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Relationships
     user = relationship("User", back_populates="accounts")

@@ -52,10 +52,11 @@ def consume_link_code(code: str) -> uuid.UUID | None:
     return entry.user_id
 
 
-def deep_link_for(code: str) -> str | None:
-    if not _bot_username:
+def deep_link_for(code: str, username: str | None = None) -> str | None:
+    bot = username or _bot_username
+    if not bot:
         return None
-    return f"https://t.me/{_bot_username}?start={code}"
+    return f"https://t.me/{bot}?start={code}"
 
 
 def _purge_expired() -> None:

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.auth.dependencies import CurrentUser, require_same_household
 from src.core.dependencies import get_db
 from src.kpis.engine import kpi_engine
 from src.kpis.models import KPIDefinition
@@ -60,8 +61,10 @@ async def validate_formula(data: KPIValidateRequest):
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_custom_kpi(
     data: KPICreate,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_same_household(data.user_id, user)
     is_valid, errors = kpi_engine.validate_formula(data.formula)
     if not is_valid:
         raise HTTPException(
@@ -71,7 +74,7 @@ async def create_custom_kpi(
 
     variables = kpi_engine.extract_variables(data.formula)
     kpi = KPIDefinition(
-        user_id=data.user_id,
+        user_id=user.id,
         name=data.name,
         description=data.description,
         formula=data.formula,
@@ -99,8 +102,10 @@ async def list_kpis_for_user(
     user_id: uuid.UUID,
     period_start: date,
     period_end: date,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_same_household(user_id, user)
     snapshots = await evaluate_and_save_kpis_for_user(db, user_id, period_start, period_end)
     items = []
     for snap in snapshots:
@@ -124,7 +129,9 @@ async def evaluate_kpis(
     user_id: uuid.UUID,
     period_start: date,
     period_end: date,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_same_household(user_id, user)
     snapshots = await evaluate_and_save_kpis_for_user(db, user_id, period_start, period_end)
     return snapshots

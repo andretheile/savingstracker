@@ -38,7 +38,7 @@ async def test_main_lifespan():
          patch("src.main.apply_default_household_selection", new_callable=AsyncMock), \
          patch("src.main.reclassify_all_users", new_callable=AsyncMock), \
          patch("src.main.ensure_schema", new_callable=AsyncMock), \
-         patch("src.main.start_polling", new_callable=AsyncMock), \
+         patch("src.main.start_all_household_bots", new_callable=AsyncMock), \
          patch("src.main.stop_polling", new_callable=AsyncMock), \
          patch("src.main.dispose_engine", new_callable=AsyncMock) as mock_dispose_db, \
          patch("src.main.close_redis", new_callable=AsyncMock) as mock_close_redis:

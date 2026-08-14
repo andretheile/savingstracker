@@ -6,16 +6,14 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config import settings
+from src.auth.dependencies import CurrentUser
 from src.core.database import get_standalone_session
-from src.core.dependencies import get_db
 from src.llm.agent import clear_history, iter_agent_events
-from src.users.service import get_or_create_default_user
+from src.users.credentials import openrouter_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -36,17 +34,15 @@ def _web_history_key(user_id: uuid.UUID) -> str:
 
 
 @router.get("/status", response_model=LLMStatusResponse)
-async def llm_status():
-    configured = bool(settings.openrouter_api_key)
-    return LLMStatusResponse(
-        configured=configured,
-        model=settings.openrouter_model if configured else None,
-    )
+async def llm_status(user: CurrentUser):
+    key, model = openrouter_for_user(user)
+    return LLMStatusResponse(configured=bool(key), model=model if key else None)
 
 
 @router.post("/chat")
-async def llm_chat(data: ChatRequest):
-    if not settings.openrouter_api_key:
+async def llm_chat(data: ChatRequest, user: CurrentUser):
+    api_key, model = openrouter_for_user(user)
+    if not api_key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Set an OpenRouter API key first.",
@@ -57,17 +53,19 @@ async def llm_chat(data: ChatRequest):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Message is empty.",
         )
+    user_id = user.id
 
     async def event_stream():
         try:
             async with get_standalone_session() as session:
-                user = await get_or_create_default_user(session)
                 async for event in iter_agent_events(
                     session,
-                    user.id,
+                    user_id,
                     text,
-                    _web_history_key(user.id),
+                    _web_history_key(user_id),
                     channel="web",
+                    api_key=api_key,
+                    model=model,
                 ):
                     yield f"data: {json.dumps(event, default=str)}\n\n"
             yield "data: {\"type\": \"done\"}\n\n"
@@ -95,7 +93,6 @@ async def llm_chat(data: ChatRequest):
 
 
 @router.post("/reset")
-async def llm_reset(db: AsyncSession = Depends(get_db)):
-    user = await get_or_create_default_user(db)
+async def llm_reset(user: CurrentUser):
     clear_history(_web_history_key(user.id))
     return {"ok": True}

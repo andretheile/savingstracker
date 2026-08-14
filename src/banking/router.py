@@ -7,19 +7,19 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.accounts.models import Account
-from src.accounts.service import create_account, get_account_balance
+from src.accounts.service import create_account, find_account_by_iban, get_account_balance
+from src.auth.dependencies import CurrentUser
 from src.banking.adapters.fints_adapter import FinTSAdapter
 from src.banking.models import BankConnection
-from src.banking.service import import_since_date
-from src.classification.service import reclassify_user_transactions
+from src.banking.service import import_since_date, upsert_bank_connection
+from src.classification.service import IBAN_RE, normalize_iban, reclassify_user_transactions
 from src.core.dependencies import get_db
-from src.core.security import encrypt_field
 from src.transactions.models import Transaction
 from src.transactions.service import add_transaction
 
@@ -75,6 +75,12 @@ class AccountSyncResponse(BaseModel):
     currency: str
     current_balance: float
     include_in_household: bool = True
+    is_depot: bool = False
+
+
+class DepotRegisterRequest(BaseModel):
+    iban: str
+    name: str = "DKB Depot"
 
 
 # ── Endpoints ────────────────────────────────────────────
@@ -82,6 +88,7 @@ class AccountSyncResponse(BaseModel):
 @router.post("/connect", response_model=ConnectResultResponse)
 async def api_connect_bank(
     data: BankConnectRequest,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     """Step 1: Connect to bank via FinTS. Returns session_id if TAN required."""
@@ -109,7 +116,9 @@ async def api_connect_bank(
         "bank_blz": data.bank_blz,
         "bank_name": data.bank_name,
         "login_name": data.login_name,
+        "pin": data.pin,
         "fints_url": data.fints_url,
+        "user_id": user.id,
     }
 
     if auth_result.requires_tan:
@@ -168,10 +177,11 @@ async def api_submit_tan(
 
 @router.get("/accounts", response_model=list[AccountSyncResponse])
 async def api_list_bank_accounts(
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
-    """List all synced bank accounts with current balances."""
-    stmt = select(Account).where(Account.is_active.is_(True))
+    """List synced bank accounts with current balances for this household."""
+    stmt = select(Account).where(Account.is_active.is_(True), Account.user_id == user.id)
     result = await db.execute(stmt)
     accounts = result.scalars().all()
 
@@ -185,16 +195,64 @@ async def api_list_bank_accounts(
             currency=acc.currency,
             current_balance=float(bal),
             include_in_household=bool(acc.include_in_household),
+            is_depot=bool(acc.is_depot),
         ))
     return response
 
 
-@router.get("/connections", response_model=list[BankConnectionResponse])
-async def api_list_connections(
+@router.post("/depot", response_model=AccountSyncResponse, status_code=status.HTTP_201_CREATED)
+async def api_register_depot(
+    data: DepotRegisterRequest,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
-    """List all bank connections."""
-    stmt = select(BankConnection).where(BankConnection.is_active.is_(True))
+    """Register a depot by IBAN before FinTS lists it, so giro transfers can be tagged."""
+    iban = normalize_iban(data.iban)
+    if not IBAN_RE.fullmatch(iban):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Enter a German IBAN (DE followed by 20 digits).",
+        )
+
+    name = (data.name or "").strip() or "DKB Depot"
+    acc = await find_account_by_iban(db, iban, user_id=user.id)
+    if acc:
+        acc.iban = iban
+        acc.is_depot = True
+        acc.name = name
+    else:
+        acc = await create_account(
+            db,
+            user_id=user.id,
+            name=name,
+            iban=iban,
+            is_depot=True,
+            include_in_household=False,
+        )
+    await db.flush()
+    await reclassify_user_transactions(db, user.id)
+    bal = await get_account_balance(db, acc.id)
+    return AccountSyncResponse(
+        id=str(acc.id),
+        name=acc.name,
+        iban=acc.iban,
+        currency=acc.currency,
+        current_balance=float(bal),
+        include_in_household=bool(acc.include_in_household),
+        is_depot=bool(acc.is_depot),
+    )
+
+
+@router.get("/connections", response_model=list[BankConnectionResponse])
+async def api_list_connections(
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """List bank connections for this household."""
+    stmt = select(BankConnection).where(
+        BankConnection.is_active.is_(True),
+        BankConnection.user_id == user.id,
+    )
     result = await db.execute(stmt)
     connections = result.scalars().all()
 
@@ -230,27 +288,27 @@ async def _fetch_and_store_accounts(
         bank_accounts = await adapter.fetch_accounts(client_data)
         logger.info("FinTS returned %d accounts", len(bank_accounts))
 
-        # Create a default user if none exists (single-user mode for now)
-        from src.users.models import User
-        stmt = select(User).limit(1)
-        result = await db.execute(stmt)
-        user = result.scalar_one_or_none()
-        if not user:
-            user = User(name="Default User", telegram_id=None)
-            db.add(user)
-            await db.flush()
+        user_id = session.get("user_id")
+        if user_id is None:
+            logger.error("FinTS session missing user_id")
+            return 0
+        from src.users.service import get_user_by_id
 
-        # Persist bank connection
-        conn = BankConnection(
+        user = await get_user_by_id(db, user_id)
+        if user is None:
+            logger.error("FinTS session user %s not found", user_id)
+            return 0
+
+        conn = await upsert_bank_connection(
+            db,
             user_id=user.id,
             bank_blz=session["bank_blz"],
             bank_name=session["bank_name"],
             fints_url=session.get("fints_url", ""),
-            login_name=encrypt_field(session["login_name"]),
-            adapter_type="fints",
-            sync_status="idle",
+            login_name=session["login_name"],
+            pin=session.get("pin"),
         )
-        db.add(conn)
+        conn.sync_status = "idle"
         await db.flush()
 
         count = 0
@@ -259,9 +317,7 @@ async def _fetch_and_store_accounts(
         for b_acc in bank_accounts:
             acc = None
             if b_acc.iban:
-                existing_stmt = select(Account).where(Account.iban == b_acc.iban)
-                existing_result = await db.execute(existing_stmt)
-                acc = existing_result.scalar_one_or_none()
+                acc = await find_account_by_iban(db, b_acc.iban, user_id=user.id)
 
             if acc is None:
                 acc = await create_account(

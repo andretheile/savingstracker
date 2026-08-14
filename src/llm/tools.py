@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from src.accounts.models import Account
 from src.accounts.service import get_account_balance, list_user_accounts
 from src.balance_sheets.service import generate_balance_sheet
+from src.banking.service import confirm_household_sync, start_household_sync
 from src.classification.models import Category
 from src.classification.service import DEFAULT_CATEGORIES, reclassify_user_transactions
 from src.kpis.engine import kpi_engine
@@ -109,7 +110,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     ),
     _tool(
         "list_accounts",
-        "List bank accounts with balances and whether they count toward household totals.",
+        "List bank accounts with balances, household flag, and whether the account is a depot.",
         {},
     ),
     _tool(
@@ -233,6 +234,20 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "Re-run auto-classification on uncategorized (non-manual) transactions.",
         {},
     ),
+    _tool(
+        "sync_bank",
+        "Refresh live bank balances and transactions via FinTS using the stored encrypted PIN. "
+        "If the bank needs app approval, tell the user to confirm in the DKB app, then call confirm_bank_sync. "
+        "Never ask for a PIN or TAN.",
+        {},
+    ),
+    _tool(
+        "confirm_bank_sync",
+        "Finish a bank refresh after the user approved the login in the DKB app. "
+        "Call only after sync_bank returned needs_approval and the user said they approved it. "
+        "Never ask for a PIN or TAN.",
+        {},
+    ),
 ]
 
 
@@ -275,6 +290,7 @@ async def _execute(
                     "iban": acc.iban,
                     "balance": float(bal),
                     "household": bool(acc.include_in_household),
+                    "depot": bool(acc.is_depot),
                 }
             )
         return rows
@@ -471,6 +487,12 @@ async def _execute(
     if name == "reclassify_transactions":
         updated = await reclassify_user_transactions(session, user_id)
         return {"updated": updated}
+
+    if name == "sync_bank":
+        return await start_household_sync(session, user_id)
+
+    if name == "confirm_bank_sync":
+        return await confirm_household_sync(session, user_id)
 
     raise ValueError(f"Unknown tool: {name}")
 

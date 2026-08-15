@@ -93,14 +93,16 @@ pct(category_rent_and_housing_total, total_income)
 
 ---
 
-## 🛡️ Creating KPIs via Telegram or REST API
+## Creating KPIs
 
-### Via Telegram Chatbot:
+Use the **KPIs** tab in the web app (header **New KPI** focuses the form), Telegram `/newkpi`, or `POST /api/kpis/` while signed in (session cookie). Swagger `/docs` is off unless `DEBUG=true`.
+
+### Via Telegram:
 ```text
 /newkpi Leisure_Share pct(category_dining_out_total + category_entertainment_total, total_expense)
 ```
 
-### Via REST API (`POST /kpis/`):
+### Via REST API (`POST /api/kpis/`, authenticated):
 ```json
 {
   "user_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
@@ -112,7 +114,7 @@ pct(category_rent_and_housing_total, total_income)
 }
 ```
 
-### Validating Formulas (`POST /kpis/validate`):
+### Validating Formulas (`POST /api/kpis/validate`, authenticated):
 ```json
 {
   "formula": "pct(net_cashflow, total_income)"

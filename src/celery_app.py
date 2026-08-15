@@ -29,15 +29,14 @@ celery_app.conf.update(
 )
 
 # ── Beat schedule (periodic tasks) ────────────────────────
+# Celery 5.6 ScheduleEntry does not accept a description= key.
 celery_app.conf.beat_schedule = {
     "monthly-report-all-users": {
         "task": "src.scheduler.tasks.generate_all_monthly_reports",
         "schedule": crontab(day_of_month="1", hour="8", minute="0"),
-        "description": "Generate and send monthly reports on the 1st at 8:00 AM",
     },
     "daily-sync-reminder": {
         "task": "src.scheduler.tasks.check_stale_connections",
         "schedule": crontab(hour="6", minute="0"),
-        "description": "Daily check for bank connections that need re-auth",
     },
 }

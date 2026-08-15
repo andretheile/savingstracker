@@ -17,6 +17,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   onSyncBank,
   onOpenNewTx,
+  onOpenNewKpi,
   onOpenSettings,
   onLogout,
   settingsActive = false,
@@ -67,6 +68,15 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Plus className="w-3.5 h-3.5" strokeWidth={1.6} />
             <span>Add transaction</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenNewKpi}
+            className="cream-button h-8 px-3 text-xs flex items-center gap-1.5"
+          >
+            <Plus className="w-3.5 h-3.5" strokeWidth={1.6} />
+            <span>New KPI</span>
           </button>
 
           <button

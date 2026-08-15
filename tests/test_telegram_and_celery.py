@@ -250,3 +250,5 @@ async def test_celery_task_wrapper_execution(async_session: AsyncSession):
 def test_celery_app_config():
     assert celery_app.main == "savingstracker"
     assert "monthly-report-all-users" in celery_app.conf.beat_schedule
+    for entry in celery_app.conf.beat_schedule.values():
+        assert "description" not in entry

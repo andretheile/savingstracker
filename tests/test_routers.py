@@ -1,6 +1,7 @@
 """Integration tests for FastAPI REST API endpoints."""
 
 import uuid
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -249,3 +250,24 @@ async def test_register_depot_iban(client: AsyncClient):
     assert listed.status_code == 200
     depots = [acc for acc in listed.json() if acc["is_depot"]]
     assert len(depots) == 1
+
+
+@pytest.mark.asyncio
+async def test_banking_sync_endpoints(client: AsyncClient):
+    start = AsyncMock(
+        return_value={"status": "needs_approval", "bank": "DKB", "message": "Approve in the app"}
+    )
+    confirm = AsyncMock(
+        return_value={"status": "synced", "bank": "DKB", "message": "Sync completed."}
+    )
+    with patch("src.banking.router.start_household_sync", start):
+        waiting = await client.post("/api/banking/sync")
+    assert waiting.status_code == 200
+    assert waiting.json()["status"] == "needs_approval"
+    start.assert_awaited_once()
+
+    with patch("src.banking.router.confirm_household_sync", confirm):
+        done = await client.post("/api/banking/sync/confirm")
+    assert done.status_code == 200
+    assert done.json()["status"] == "synced"
+    confirm.assert_awaited_once()

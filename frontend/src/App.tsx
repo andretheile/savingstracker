@@ -9,7 +9,9 @@ import { TransactionsTable } from './components/TransactionsTable';
 import { TelegramStatusCard } from './components/TelegramStatusCard';
 import { ChatView } from './components/ChatView';
 import { HouseholdMembersCard } from './components/HouseholdMembersCard';
+import { AddTransactionModal } from './components/AddTransactionModal';
 import { AdminHouseholdsCard } from './components/AdminHouseholdsCard';
+import { SyncBankModal, type SyncResult } from './components/SyncBankModal';
 import { fetchJson, loadDashboard } from './api';
 import type { Account, BalanceSheetData, KPISnapshot, Transaction } from './types';
 
@@ -58,6 +60,10 @@ export function App() {
   const [periodDays, setPeriodDays] = useState(30);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
+  const [syncConfirming, setSyncConfirming] = useState(false);
+  const [showAddTx, setShowAddTx] = useState(false);
+  const [kpiFocus, setKpiFocus] = useState(0);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
 
   const refresh = useCallback(async () => {
@@ -99,9 +105,36 @@ export function App() {
   const handleSyncBank = async () => {
     setIsSyncing(true);
     try {
-      await refresh();
+      const result = await fetchJson<SyncResult>('/banking/sync', { method: 'POST' });
+      if (result.status === 'synced' || result.status === 'multi') {
+        await refresh();
+      }
+      setSyncResult(result);
+    } catch (err) {
+      setSyncResult({
+        status: 'error',
+        message: err instanceof Error ? err.message : 'Bank sync failed.',
+      });
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleConfirmSync = async () => {
+    setSyncConfirming(true);
+    try {
+      const result = await fetchJson<SyncResult>('/banking/sync/confirm', { method: 'POST' });
+      if (result.status === 'synced') {
+        await refresh();
+      }
+      setSyncResult(result);
+    } catch (err) {
+      setSyncResult({
+        status: 'error',
+        message: err instanceof Error ? err.message : 'Could not finish bank sync.',
+      });
+    } finally {
+      setSyncConfirming(false);
     }
   };
 
@@ -195,8 +228,11 @@ export function App() {
         <div className="page-shell">
           <Header
             onSyncBank={handleSyncBank}
-            onOpenNewTx={() => setActiveTab('transactions')}
-            onOpenNewKpi={() => setActiveTab('kpis')}
+            onOpenNewTx={() => setShowAddTx(true)}
+            onOpenNewKpi={() => {
+              setActiveTab('kpis');
+              setKpiFocus((n) => n + 1);
+            }}
             onOpenSettings={() => setActiveTab('settings')}
             onLogout={handleLogout}
             settingsActive={activeTab === 'settings'}
@@ -227,6 +263,8 @@ export function App() {
             totalExpense={balanceSheet.total_expense}
             netCashflow={balanceSheet.net_cashflow}
             daysInPeriod={periodDays}
+            onOpenOverview={() => setActiveTab('overview')}
+            onOpenTransactions={() => setActiveTab('transactions')}
           />
         )}
 
@@ -269,7 +307,7 @@ export function App() {
         )}
 
         {activeTab === 'kpis' && userId && (
-          <KpiStudio userId={userId} kpis={kpis} onAddKpi={handleAddKpi} />
+          <KpiStudio userId={userId} kpis={kpis} onAddKpi={handleAddKpi} focusNew={kpiFocus} />
         )}
 
         {activeTab === 'banking' && (
@@ -291,6 +329,26 @@ export function App() {
       <footer className="border-t border-[#E5DFD4] py-5 text-center text-[11px] text-[#8A8278]">
         SavingsTracker
       </footer>
+      {showAddTx && userId && (
+        <AddTransactionModal
+          userId={userId}
+          accounts={accounts}
+          onClose={() => setShowAddTx(false)}
+          onCreated={refresh}
+        />
+      )}
+      {syncResult && (
+        <SyncBankModal
+          result={syncResult}
+          confirming={syncConfirming}
+          onConfirm={() => void handleConfirmSync()}
+          onClose={() => setSyncResult(null)}
+          onOpenBanking={() => {
+            setSyncResult(null);
+            setActiveTab('banking');
+          }}
+        />
+      )}
     </div>
   );
 }

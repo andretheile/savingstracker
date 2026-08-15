@@ -26,7 +26,7 @@ interface BankAccount {
   is_depot?: boolean;
 }
 
-export const BankingHub: React.FC<BankingHubProps> = ({ onDataChanged }) => {
+export const BankingHub: React.FC<BankingHubProps> = ({ onDataChanged, onSyncBank, isSyncing }) => {
   const [showModal, setShowModal] = useState(false);
   const [showDepotModal, setShowDepotModal] = useState(false);
   const [depotName, setDepotName] = useState('DKB Depot');
@@ -207,6 +207,15 @@ export const BankingHub: React.FC<BankingHubProps> = ({ onDataChanged }) => {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onSyncBank}
+            disabled={isSyncing}
+            className="cream-button px-3 text-xs flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} strokeWidth={1.6} />
+            {isSyncing ? 'Syncing…' : 'Sync bank'}
+          </button>
           <button
             onClick={fetchAccounts}
             disabled={isLoadingAccounts}

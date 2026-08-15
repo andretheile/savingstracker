@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { KPISnapshot } from '../types';
 import { CheckCircle2, AlertCircle, Plus } from 'lucide-react';
 import { SelectMenu } from './SelectMenu';
@@ -8,13 +8,21 @@ interface KpiStudioProps {
   userId: string;
   kpis: KPISnapshot[];
   onAddKpi: (newKpi: KPISnapshot) => void | Promise<void>;
+  focusNew?: number;
 }
 
-export const KpiStudio: React.FC<KpiStudioProps> = ({ userId, kpis, onAddKpi }) => {
+export const KpiStudio: React.FC<KpiStudioProps> = ({ userId, kpis, onAddKpi, focusNew = 0 }) => {
   const [name, setName] = useState('');
   const [formula, setFormula] = useState('');
   const [unit, setUnit] = useState('%');
   const [testResult, setTestResult] = useState<{ isValid: boolean; value?: number; variables?: string[]; error?: string } | null>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (focusNew > 0) {
+      nameRef.current?.focus();
+    }
+  }, [focusNew]);
 
   const handleTestFormula = async () => {
     if (!formula.trim()) return;
@@ -97,6 +105,7 @@ export const KpiStudio: React.FC<KpiStudioProps> = ({ userId, kpis, onAddKpi }) 
             <div>
               <label className="text-xs text-[#6B645A] font-medium block mb-1">Name</label>
               <input
+                ref={nameRef}
                 type="text"
                 placeholder="e.g. Leisure budget ratio"
                 value={name}

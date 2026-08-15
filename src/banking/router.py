@@ -17,7 +17,12 @@ from src.accounts.service import create_account, find_account_by_iban, get_accou
 from src.auth.dependencies import CurrentUser
 from src.banking.adapters.fints_adapter import FinTSAdapter
 from src.banking.models import BankConnection
-from src.banking.service import import_since_date, upsert_bank_connection
+from src.banking.service import (
+    confirm_household_sync,
+    import_since_date,
+    start_household_sync,
+    upsert_bank_connection,
+)
 from src.classification.service import IBAN_RE, normalize_iban, reclassify_user_transactions
 from src.core.dependencies import get_db
 from src.transactions.models import Transaction
@@ -81,6 +86,14 @@ class AccountSyncResponse(BaseModel):
 class DepotRegisterRequest(BaseModel):
     iban: str
     name: str = "DKB Depot"
+
+
+class HouseholdSyncResponse(BaseModel):
+    status: str
+    message: str = ""
+    bank: str | None = None
+    last_synced_at: str | None = None
+    connections: list[dict[str, Any]] | None = None
 
 
 # ── Endpoints ────────────────────────────────────────────
@@ -241,6 +254,26 @@ async def api_register_depot(
         include_in_household=bool(acc.include_in_household),
         is_depot=bool(acc.is_depot),
     )
+
+
+@router.post("/sync", response_model=HouseholdSyncResponse)
+async def api_start_household_sync(
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Refresh linked banks using the stored PIN. May require DKB app approval."""
+    result = await start_household_sync(db, user.id)
+    return HouseholdSyncResponse(**result)
+
+
+@router.post("/sync/confirm", response_model=HouseholdSyncResponse)
+async def api_confirm_household_sync(
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Finish a sync after the user approved the login in the banking app."""
+    result = await confirm_household_sync(db, user.id)
+    return HouseholdSyncResponse(**result)
 
 
 @router.get("/connections", response_model=list[BankConnectionResponse])

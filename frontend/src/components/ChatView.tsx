@@ -30,7 +30,7 @@ const STORAGE_KEY = 'savingstracker-chat';
 const SUGGESTIONS = [
   'How is household cashflow this month?',
   'What did we spend on groceries?',
-  'Refresh bank data from DKB',
+  'Put all REWE purchases in Groceries',
 ];
 
 function loadMessages(): ChatMessage[] {

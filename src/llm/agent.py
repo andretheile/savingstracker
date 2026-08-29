@@ -32,6 +32,9 @@ TOOL_LABELS = {
     "set_transaction_category": "Changing a category",
     "set_transaction_exclude": "Updating an exclude flag",
     "list_categories": "Listing categories",
+    "create_category": "Adding a category",
+    "label_transactions": "Labeling transactions",
+    "create_classification_rule": "Adding a classification rule",
     "get_balance_sheet": "Reading the balance sheet",
     "get_kpis": "Evaluating KPIs",
     "create_kpi": "Creating a KPI",
@@ -62,6 +65,7 @@ def _system_prompt(channel: str) -> str:
         "Rules:\n"
         "- Always use tools for numbers. Do not invent balances or transactions.\n"
         "- Expenses are negative amounts when adding transactions.\n"
+        "- To recategorize spendings, use list_transactions then label_transactions (search by merchant) or set_transaction_category (by id). Call create_category first if the name does not exist. Use create_classification_rule so similar future bookings auto-label.\n"
         f"- {brevity}\n"
         "- Never ask for a bank PIN or TAN. Sync uses the PIN stored encrypted when the bank was linked.\n"
         "- If sync_bank returns needs_approval, tell the user to confirm in the DKB app, then wait for them to say they did before calling confirm_bank_sync.\n"
@@ -135,6 +139,13 @@ def _summarize_tool_result(raw: str) -> str:
     if isinstance(data, list):
         return f"{len(data)} items"
     if isinstance(data, dict):
+        if "labeled" in data:
+            extra = " (more matches truncated)" if data.get("truncated") else ""
+            return f"Labeled {data['labeled']} as {data.get('category', 'category')}{extra}"
+        if data.get("custom") and data.get("name") and data.get("direction"):
+            return f"Created category {data['name']}"
+        if data.get("rule_id") and data.get("value"):
+            return f"Rule: {data.get('value')} → {data.get('category')}"
         if "count" in data:
             return f"{data['count']} matches"
         if "updated" in data:

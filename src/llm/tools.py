@@ -16,8 +16,13 @@ from src.accounts.models import Account
 from src.accounts.service import get_account_balance, list_user_accounts
 from src.balance_sheets.service import generate_balance_sheet
 from src.banking.service import confirm_household_sync, start_household_sync
-from src.classification.models import Category
-from src.classification.service import DEFAULT_CATEGORIES, reclassify_user_transactions
+from src.classification.service import (
+    create_user_category,
+    create_user_classification_rule,
+    get_category_by_name,
+    list_categories_for_user,
+    reclassify_user_transactions,
+)
 from src.kpis.engine import kpi_engine
 from src.kpis.models import KPIDefinition
 from src.kpis.service import evaluate_and_save_kpis_for_user
@@ -25,7 +30,7 @@ from src.projections.service import generate_user_projection, get_or_create_user
 from src.transactions.models import Transaction
 from src.transactions.service import add_transaction
 
-_CATEGORY_NAMES = [c["name"] for c in DEFAULT_CATEGORIES]
+_LABEL_LIMIT = 80
 
 
 def _json(value: Any) -> str:
@@ -57,6 +62,7 @@ def _tx_dict(tx: Transaction) -> dict[str, Any]:
         "account_id": str(tx.account_id),
         "category": category.name if category else None,
         "excluded": bool(tx.exclude_from_totals),
+        "manually_classified": bool(tx.is_manually_classified),
     }
 
 
@@ -137,6 +143,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "period_start": {"type": "string", "description": "YYYY-MM-DD"},
             "period_end": {"type": "string", "description": "YYYY-MM-DD"},
             "household_only": {"type": "boolean"},
+            "uncategorized_only": {
+                "type": "boolean",
+                "description": "If true, only return transactions with no category",
+            },
             "limit": {"type": "integer"},
         },
     ),
@@ -155,10 +165,13 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     ),
     _tool(
         "set_transaction_category",
-        "Set the category of a transaction by id.",
+        "Set the category of one transaction by id. Use label_transactions to recategorize several matches.",
         {
             "transaction_id": {"type": "string"},
-            "category": {"type": "string", "enum": _CATEGORY_NAMES},
+            "category": {
+                "type": "string",
+                "description": "Existing category name. Create it first with create_category if needed.",
+            },
         },
         ["transaction_id", "category"],
     ),
@@ -173,8 +186,70 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     ),
     _tool(
         "list_categories",
-        "List available transaction categories.",
+        "List household and built-in transaction categories.",
         {},
+    ),
+    _tool(
+        "create_category",
+        "Add a new household category. Use before labeling spendings that do not fit an existing name.",
+        {
+            "name": {"type": "string"},
+            "direction": {
+                "type": "string",
+                "enum": ["income", "expense", "transfer"],
+                "description": "Defaults to expense",
+            },
+            "icon": {"type": "string", "description": "Optional short emoji icon"},
+        },
+        ["name"],
+    ),
+    _tool(
+        "label_transactions",
+        "Label matching spendings with a category. Search description/counterparty, or pass transaction ids. "
+        "Set create_rule=true to also auto-classify future similar bookings.",
+        {
+            "category": {"type": "string"},
+            "search": {
+                "type": "string",
+                "description": "Match description, counterparty, or current category (e.g. REWE, Lidl)",
+            },
+            "transaction_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Specific transaction ids to label",
+            },
+            "uncategorized_only": {"type": "boolean"},
+            "period_start": {"type": "string", "description": "YYYY-MM-DD; omit to search all dates"},
+            "period_end": {"type": "string", "description": "YYYY-MM-DD"},
+            "household_only": {"type": "boolean"},
+            "limit": {"type": "integer"},
+            "create_rule": {
+                "type": "boolean",
+                "description": "If true and search is set, add a contains rule for future syncs",
+            },
+        },
+        ["category"],
+    ),
+    _tool(
+        "create_classification_rule",
+        "Auto-classify future transactions into a category when description/counterparty matches.",
+        {
+            "category": {"type": "string"},
+            "value": {"type": "string", "description": "Text or regex to match, e.g. REWE"},
+            "field": {
+                "type": "string",
+                "enum": ["any", "description", "counterparty", "amount"],
+            },
+            "operator": {
+                "type": "string",
+                "enum": ["contains", "equals", "regex", "gt", "lt"],
+            },
+            "priority": {
+                "type": "integer",
+                "description": "Lower runs first. Default 50.",
+            },
+        },
+        ["category", "value"],
     ),
     _tool(
         "get_balance_sheet",
@@ -324,8 +399,11 @@ async def _execute(
         )
         txs = list((await session.execute(stmt)).scalars().all())
         search = (args.get("search") or "").strip().lower()
+        uncategorized_only = bool(args.get("uncategorized_only"))
         filtered = []
         for tx in txs:
+            if uncategorized_only and tx.category_id is not None:
+                continue
             cat_name = getattr(tx.category, "name", "") or ""
             blob = f"{tx.description} {tx.counterparty} {cat_name}".lower()
             if search and search not in blob:
@@ -338,7 +416,7 @@ async def _execute(
         acc = await _find_account(session, user_id, account=args.get("account"))
         category_id = None
         if args.get("category"):
-            cat = await _category_by_name(session, args["category"])
+            cat = await get_category_by_name(session, user_id, args["category"])
             category_id = cat.id
         tx = await add_transaction(
             session,
@@ -359,7 +437,7 @@ async def _execute(
 
     if name == "set_transaction_category":
         tx = await _get_tx(session, user_id, args["transaction_id"])
-        cat = await _category_by_name(session, args["category"])
+        cat = await get_category_by_name(session, user_id, args["category"])
         tx.category_id = cat.id
         tx.is_manually_classified = True
         await session.flush()
@@ -373,10 +451,54 @@ async def _execute(
         return _tx_dict(tx)
 
     if name == "list_categories":
-        cats = list((await session.execute(select(Category))).scalars().all())
-        if cats:
-            return [{"name": c.name, "direction": c.direction} for c in cats]
-        return [{"name": c["name"], "direction": c["direction"]} for c in DEFAULT_CATEGORIES]
+        cats = await list_categories_for_user(session, user_id)
+        return [
+            {
+                "name": c.name,
+                "direction": c.direction,
+                "icon": c.icon,
+                "custom": c.user_id is not None,
+            }
+            for c in cats
+        ]
+
+    if name == "create_category":
+        cat = await create_user_category(
+            session,
+            user_id,
+            name=args["name"],
+            direction=args.get("direction") or "expense",
+            icon=args.get("icon") or "",
+        )
+        return {
+            "name": cat.name,
+            "direction": cat.direction,
+            "icon": cat.icon,
+            "custom": True,
+        }
+
+    if name == "label_transactions":
+        return await _label_transactions(session, user_id, args)
+
+    if name == "create_classification_rule":
+        cat = await get_category_by_name(session, user_id, args["category"])
+        rule = await create_user_classification_rule(
+            session,
+            user_id,
+            category=cat,
+            field=args.get("field") or "any",
+            operator=args.get("operator") or "contains",
+            value=args["value"],
+            priority=args.get("priority") if args.get("priority") is not None else 50,
+        )
+        return {
+            "rule_id": str(rule.id),
+            "category": cat.name,
+            "field": rule.field,
+            "operator": rule.operator,
+            "value": rule.value,
+            "priority": rule.priority,
+        }
 
     if name == "get_balance_sheet":
         start, end = _month_bounds(args.get("period_start"), args.get("period_end"))
@@ -514,9 +636,91 @@ async def _get_tx(session: AsyncSession, user_id: uuid.UUID, tx_id: str) -> Tran
     return tx
 
 
-async def _category_by_name(session: AsyncSession, name: str) -> Category:
-    stmt = select(Category).where(Category.name == name).limit(1)
-    cat = (await session.execute(stmt)).scalars().first()
-    if cat is None:
-        raise ValueError(f"Unknown category '{name}'. Use list_categories.")
-    return cat
+async def _label_transactions(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    args: dict[str, Any],
+) -> dict[str, Any]:
+    cat = await get_category_by_name(session, user_id, args["category"])
+    raw_ids = args.get("transaction_ids") or []
+    if not isinstance(raw_ids, list):
+        raw_ids = [raw_ids]
+    wanted_ids: set[uuid.UUID] = set()
+    for raw in raw_ids:
+        try:
+            wanted_ids.add(uuid.UUID(str(raw)))
+        except ValueError as exc:
+            raise ValueError(f"Invalid transaction id: {raw}") from exc
+    search = (args.get("search") or "").strip()
+    if not wanted_ids and not search:
+        raise ValueError("Provide search or transaction_ids")
+
+    household_only = bool(args.get("household_only", True))
+    accounts = await list_user_accounts(session, user_id, household_only=household_only)
+    account_ids = [a.id for a in accounts]
+    if not account_ids:
+        return {"labeled": 0, "category": cat.name, "transactions": []}
+
+    stmt = (
+        select(Transaction)
+        .options(selectinload(Transaction.account), selectinload(Transaction.category))
+        .where(Transaction.account_id.in_(account_ids))
+        .order_by(Transaction.transaction_date.desc())
+    )
+    start, end = args.get("period_start"), args.get("period_end")
+    if start:
+        stmt = stmt.where(Transaction.transaction_date >= date.fromisoformat(start))
+    if end:
+        stmt = stmt.where(Transaction.transaction_date <= date.fromisoformat(end))
+    txs = list((await session.execute(stmt)).scalars().all())
+
+    needle = search.lower()
+    uncategorized_only = bool(args.get("uncategorized_only"))
+    matches: list[Transaction] = []
+    for tx in txs:
+        if wanted_ids and tx.id not in wanted_ids:
+            continue
+        if uncategorized_only and tx.category_id is not None:
+            continue
+        if needle:
+            cat_name = getattr(tx.category, "name", "") or ""
+            blob = f"{tx.description} {tx.counterparty} {cat_name}".lower()
+            if needle not in blob:
+                continue
+        matches.append(tx)
+
+    limit = min(int(args.get("limit") or _LABEL_LIMIT), _LABEL_LIMIT)
+    truncated = len(matches) > limit
+    selected = matches[:limit]
+    for tx in selected:
+        tx.category_id = cat.id
+        tx.is_manually_classified = True
+        tx.category = cat
+    await session.flush()
+
+    rule_payload = None
+    if bool(args.get("create_rule")):
+        if not search:
+            raise ValueError("create_rule requires search so the rule has a pattern")
+        rule = await create_user_classification_rule(
+            session,
+            user_id,
+            category=cat,
+            field="any",
+            operator="contains",
+            value=search,
+        )
+        rule_payload = {
+            "rule_id": str(rule.id),
+            "field": rule.field,
+            "operator": rule.operator,
+            "value": rule.value,
+        }
+
+    return {
+        "labeled": len(selected),
+        "category": cat.name,
+        "truncated": truncated,
+        "transactions": [_tx_dict(tx) for tx in selected],
+        "rule": rule_payload,
+    }

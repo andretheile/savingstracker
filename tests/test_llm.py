@@ -153,6 +153,125 @@ async def test_llm_tools_accounts_and_transactions(async_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_llm_create_category_and_label_transactions(async_session: AsyncSession):
+    user = await get_or_create_user_by_telegram_id(async_session, 4243, "Andre")
+    user_id = user.id
+    await create_account(
+        async_session, user_id, "Joint Giro", iban="DE36120300001205941121", initial_balance=1000
+    )
+    await seed_default_categories(async_session)
+    await async_session.commit()
+
+    created = _parse(
+        await execute_tool(
+            async_session,
+            user_id,
+            "create_category",
+            {"name": "Dog Care", "direction": "expense"},
+        )
+    )
+    assert created["name"] == "Dog Care"
+    assert created["custom"] is True
+
+    duplicate = _parse(
+        await execute_tool(
+            async_session,
+            user_id,
+            "create_category",
+            {"name": "dog care"},
+        )
+    )
+    assert "error" in duplicate
+
+    cats = _parse(await execute_tool(async_session, user_id, "list_categories", {}))
+    assert any(c["name"] == "Dog Care" and c["custom"] for c in cats)
+
+    first = _parse(
+        await execute_tool(
+            async_session,
+            user_id,
+            "add_transaction",
+            {
+                "account": "1121",
+                "date": date.today().isoformat(),
+                "amount": -42.5,
+                "description": "Fressnapf dog food",
+                "counterparty": "Fressnapf GmbH",
+            },
+        )
+    )
+    second = _parse(
+        await execute_tool(
+            async_session,
+            user_id,
+            "add_transaction",
+            {
+                "account": "1121",
+                "date": date.today().isoformat(),
+                "amount": -19,
+                "description": "Fressnapf treats",
+                "counterparty": "Fressnapf",
+            },
+        )
+    )
+
+    labeled = _parse(
+        await execute_tool(
+            async_session,
+            user_id,
+            "label_transactions",
+            {"search": "fressnapf", "category": "Dog Care", "create_rule": True},
+        )
+    )
+    assert labeled["labeled"] == 2
+    assert labeled["category"] == "Dog Care"
+    assert labeled["rule"]["value"] == "fressnapf"
+
+    recat = _parse(
+        await execute_tool(
+            async_session,
+            user_id,
+            "set_transaction_category",
+            {"transaction_id": first["id"], "category": "dog care"},
+        )
+    )
+    assert recat["category"] == "Dog Care"
+
+    by_id = _parse(
+        await execute_tool(
+            async_session,
+            user_id,
+            "label_transactions",
+            {"transaction_ids": [second["id"]], "category": "Shopping"},
+        )
+    )
+    assert by_id["labeled"] == 1
+    assert by_id["transactions"][0]["category"] == "Shopping"
+
+    missing = _parse(
+        await execute_tool(
+            async_session,
+            user_id,
+            "label_transactions",
+            {"search": "fressnapf", "category": "Does Not Exist"},
+        )
+    )
+    assert "error" in missing
+    assert "create_category" in missing["error"]
+
+    rule = _parse(
+        await execute_tool(
+            async_session,
+            user_id,
+            "create_classification_rule",
+            {"category": "Dog Care", "value": "zooplus", "field": "any"},
+        )
+    )
+    assert rule["category"] == "Dog Care"
+    assert rule["value"] == "zooplus"
+
+
+@pytest.mark.asyncio
 async def test_llm_agent_tool_loop(async_session: AsyncSession):
     user = await get_or_create_user_by_telegram_id(async_session, 4343, "Andre")
     await create_account(async_session, user.id, "Joint Giro", iban="DE36120300001205941121")

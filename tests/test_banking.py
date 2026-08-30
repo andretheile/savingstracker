@@ -214,6 +214,33 @@ def test_submit_tan_polls_decoupled_until_confirmed():
     client.send_tan.assert_called_with(pending, "")
 
 
+def test_submit_tan_marks_empty_tan_as_decoupled():
+    adapter = FinTSAdapter()
+    client = MagicMock()
+    challenge = MagicMock()
+    challenge.decoupled = False
+    client.send_tan.return_value = "ok"
+
+    with patch("fints.client.NeedTANResponse", type("X", (), {})):
+        adapter._submit_tan(client, challenge, "", False)
+
+    assert challenge.decoupled is True
+    client.send_tan.assert_called_once()
+
+
+def test_friendly_tan_error_rewrites_bpd_message():
+    from src.banking.adapters.fints_adapter import _friendly_tan_error
+
+    msg = _friendly_tan_error(
+        Exception(
+            "Error during dialog initialization, could not fetch BPD. "
+            "Please check that you passed the correct bank identifier to the HBCI URL of the correct bank."
+        )
+    )
+    assert "BPD" not in msg
+    assert "Sync bank" in msg
+
+
 @pytest.mark.asyncio
 async def test_stored_pin_and_household_sync_flow(async_session: AsyncSession):
     clear_pending_syncs()

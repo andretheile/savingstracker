@@ -121,6 +121,21 @@ async def api_connect_bank(
             error=auth_result.error or "Connection failed",
         )
 
+    # Save login + PIN immediately so Sync can start a new consent if this dialog dies.
+    resolved_url = adapter._resolve_url(data.bank_blz, data.fints_url)
+    conn = await upsert_bank_connection(
+        db,
+        user_id=user.id,
+        bank_blz=data.bank_blz,
+        bank_name=data.bank_name,
+        fints_url=resolved_url,
+        login_name=data.login_name,
+        pin=data.pin,
+    )
+    conn.sync_status = "syncing" if auth_result.requires_tan else "idle"
+    conn.last_error = None
+    await db.flush()
+
     # Generate a session ID and store the live FinTS client
     session_id = str(uuid.uuid4())
     _active_sessions[session_id] = {
@@ -173,6 +188,17 @@ async def api_submit_tan(
     )
 
     if not tan_result.success:
+        user_id = session.get("user_id")
+        if user_id is not None:
+            stmt = select(BankConnection).where(
+                BankConnection.user_id == user_id,
+                BankConnection.is_active.is_(True),
+            )
+            conn = (await db.execute(stmt)).scalars().first()
+            if conn:
+                conn.sync_status = "error"
+                conn.last_error = tan_result.error
+                await db.flush()
         return ConnectResultResponse(
             success=False,
             error=tan_result.error or "TAN verification failed",

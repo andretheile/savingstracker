@@ -65,7 +65,7 @@ def _system_prompt(channel: str) -> str:
         "Rules:\n"
         "- Always use tools for numbers. Do not invent balances or transactions.\n"
         "- Expenses are negative amounts when adding transactions.\n"
-        "- To recategorize spendings, use list_transactions then label_transactions (search by merchant) or set_transaction_category (by id). Call create_category first if the name does not exist. Use create_classification_rule so similar future bookings auto-label.\n"
+        "- To recategorize spendings, use list_transactions then label_transactions (search by merchant) or set_transaction_category (by id). Call create_category first if the name does not exist. Labeling learns a household rule from the merchant or employer so similar future bookings auto-classify.\n"
         f"- {brevity}\n"
         "- Never ask for a bank PIN or TAN. Sync uses the PIN stored encrypted when the bank was linked.\n"
         "- If sync_bank returns needs_approval, tell the user to confirm in the DKB app, then wait for them to say they did before calling confirm_bank_sync.\n"

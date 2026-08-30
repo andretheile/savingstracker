@@ -130,8 +130,9 @@ async def api_set_transaction_category(
 
     tx.category_id = category.id
     tx.is_manually_classified = True
-    await db.flush()
     tx.category = category
+    await db.flush()
+    await reclassify_user_transactions(db, user.id)
     return _to_response(tx)
 
 

@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.accounts.models import Account
 from src.classification.models import Category, ClassificationRule
@@ -18,6 +19,75 @@ from src.transactions.models import Transaction
 logger = logging.getLogger(__name__)
 
 IBAN_RE = re.compile(r"DE[0-9]{20}", re.IGNORECASE)
+
+# Legal forms, bank noise, and SEPA words that must not become household rules.
+_GENERIC_RULE_TOKENS = {
+    "ag",
+    "co",
+    "eg",
+    "eur",
+    "euro",
+    "gmbh",
+    "kg",
+    "mbh",
+    "ohg",
+    "se",
+    "ug",
+    "sepa",
+    "lastschrift",
+    "ueberweisung",
+    "uberweisung",
+    "überweisung",
+    "zahlung",
+    "zahlungseingang",
+    "zahlungsausgang",
+    "dauerauftrag",
+    "gutschrift",
+    "abbuchung",
+    "uebertrag",
+    "ubertrag",
+    "übertrag",
+    "visa",
+    "mastercard",
+    "debitkarte",
+    "debitkartenumsatz",
+    "kreditkarte",
+    "kartenzahlung",
+    "girocard",
+    "verwendungszweck",
+    "referenz",
+    "referenznr",
+    "end-to-end",
+    "dkb",
+    "commerzbank",
+    "sparkasse",
+    "postbank",
+    "online",
+    "banking",
+    "und",
+    "der",
+    "die",
+    "das",
+    "von",
+    "für",
+    "fur",
+    "mit",
+    "the",
+    "and",
+    "for",
+}
+
+# Payroll words already covered by builtins — not useful as the only learned pattern.
+_GENERIC_PAYROLL_TOKENS = {
+    "gehalt",
+    "lohn",
+    "salary",
+    "entgelt",
+    "bezüge",
+    "bezuge",
+    "vergütung",
+    "verguetung",
+}
 
 TRANSFER_CATEGORY = "Internal Transfer"
 DEPOT_CATEGORY = "Depot Transfer"
@@ -33,7 +103,11 @@ class BuiltinRule:
 # First match wins. Patterns run against description + counterparty + reference.
 BUILTIN_RULES: list[BuiltinRule] = [
     BuiltinRule("Rent & Housing", r"win-win|miete|wohnung|betriebskosten|hausgeld|kaltmiete", 10),
-    BuiltinRule("Salary", r"gehalt|lohnabrechnung|\bsalary\b", 15),
+    BuiltinRule(
+        "Salary",
+        r"gehalt|lohnabrechnung|lohnzahlung|lohn/gehalt|\blohn\b|\bsalary\b|bez[uü]ge|\bentgelt\b|verg[uü]tung",
+        15,
+    ),
     BuiltinRule(
         "Depot Transfer",
         r"wertpapierdepot|depotübertrag|dkb.?depot|\bdepotkonto\b|\bdepot\b",
@@ -72,6 +146,47 @@ def holder_name_after_iban(text: str | None) -> str:
     if not match:
         return ""
     return re.sub(r"\s+", " ", (text or "")[match.end() :]).strip()
+
+
+def _distinctive_phrase(text: str) -> str:
+    """Strip IBANs, legal forms, and SEPA noise; keep a short merchant/employer phrase."""
+    cleaned = IBAN_RE.sub(" ", text or "")
+    cleaned = re.sub(r"[/|,;:+._]+", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned:
+        return ""
+    tokens = re.findall(r"[A-Za-zÄÖÜäöüß0-9&-]+", cleaned)
+    kept: list[str] = []
+    for tok in tokens:
+        low = tok.lower().strip("-")
+        if len(low) < 3:
+            continue
+        if low in _GENERIC_RULE_TOKENS or low in _GENERIC_PAYROLL_TOKENS:
+            continue
+        if re.fullmatch(r"\d+", low):
+            continue
+        kept.append(tok)
+    if not kept:
+        return ""
+    phrase = " ".join(kept[:3]).strip()
+    return phrase[:80]
+
+
+def rule_value_from_transaction(
+    tx: Transaction | None = None,
+    search_hint: str | None = None,
+) -> str | None:
+    """Pick a contains-rule value from an explicit search or the booking itself."""
+    hint = (search_hint or "").strip()
+    if len(hint) >= 3 and hint.lower() not in _GENERIC_RULE_TOKENS:
+        return hint[:80]
+    if tx is None:
+        return None
+    for raw in (tx.counterparty, tx.description, tx.reference):
+        phrase = _distinctive_phrase(raw or "")
+        if phrase:
+            return phrase
+    return None
 
 
 def collect_own_holder_names(transactions: list[Transaction], own_ibans: set[str]) -> set[str]:
@@ -288,8 +403,17 @@ async def reclassify_user_transactions(session: AsyncSession, user_id: uuid.UUID
         return 0
 
     categories_by_name = await _system_categories(session)
-    all_stmt = select(Transaction).where(Transaction.account_id.in_(account_ids))
+    cats_by_id = {cat.id: cat for cat in categories_by_name.values()}
+    extra_cats = list((await session.execute(select(Category))).scalars().all())
+    for cat in extra_cats:
+        cats_by_id.setdefault(cat.id, cat)
+    all_stmt = (
+        select(Transaction)
+        .options(selectinload(Transaction.category))
+        .where(Transaction.account_id.in_(account_ids))
+    )
     all_txs = list((await session.execute(all_stmt)).scalars().all())
+    await learn_from_manual_transactions(session, user_id, all_txs)
     own_names = collect_own_holder_names(all_txs, own_ibans)
     txs = [tx for tx in all_txs if not tx.is_manually_classified]
     updated = 0
@@ -308,6 +432,7 @@ async def reclassify_user_transactions(session: AsyncSession, user_id: uuid.UUID
         changed = False
         if matched is not None and tx.category_id != matched:
             tx.category_id = matched
+            tx.category = cats_by_id.get(matched)
             changed = True
         if is_internal_transfer(tx, own_ibans, source_iban, own_names):
             if tx.exclude_from_totals:
@@ -496,6 +621,88 @@ async def create_user_classification_rule(
     session.add(rule)
     await session.flush()
     return rule
+
+
+async def learn_classification_rule(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    category: Category,
+    *,
+    tx: Transaction | None = None,
+    search_hint: str | None = None,
+    priority: int = 50,
+) -> ClassificationRule | None:
+    """Persist a household rule from a manual label so similar bookings auto-classify."""
+    value = rule_value_from_transaction(tx, search_hint)
+    if not value:
+        return None
+
+    stmt = select(ClassificationRule).where(
+        ClassificationRule.user_id == user_id,
+        ClassificationRule.is_active.is_(True),
+    )
+    existing = list((await session.execute(stmt)).scalars().all())
+    needle = value.lower()
+    for rule in existing:
+        if rule.value.lower() == needle:
+            return rule
+        if tx is not None and rule.category_id == category.id and _matches(tx, rule):
+            return rule
+
+    return await create_user_classification_rule(
+        session,
+        user_id,
+        category=category,
+        field="any",
+        operator="contains",
+        value=value,
+        priority=priority,
+    )
+
+
+async def learn_from_manual_transactions(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    transactions: list[Transaction],
+) -> int:
+    """Turn existing manual labels into distinctive merchant/employer rules."""
+    stmt = select(ClassificationRule).where(
+        ClassificationRule.user_id == user_id,
+        ClassificationRule.is_active.is_(True),
+    )
+    existing = list((await session.execute(stmt)).scalars().all())
+    existing_values = {rule.value.lower() for rule in existing}
+    created = 0
+    manuals: list[Transaction] = []
+    for tx in transactions:
+        if not tx.is_manually_classified or tx.category_id is None:
+            continue
+        if tx.category is None:
+            tx.category = await session.get(Category, tx.category_id)
+        if tx.category is None:
+            continue
+        manuals.append(tx)
+    manuals.sort(key=lambda tx: tx.transaction_date, reverse=True)
+    for tx in manuals:
+        value = rule_value_from_transaction(tx)
+        if not value or value.lower() in existing_values:
+            continue
+        if any(
+            rule.category_id == tx.category_id and _matches(tx, rule) for rule in existing
+        ):
+            continue
+        rule = await create_user_classification_rule(
+            session,
+            user_id,
+            category=tx.category,
+            field="any",
+            operator="contains",
+            value=value,
+        )
+        existing.append(rule)
+        existing_values.add(value.lower())
+        created += 1
+    return created
 
 
 async def seed_default_categories(session: AsyncSession) -> int:

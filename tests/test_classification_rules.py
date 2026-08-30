@@ -368,3 +368,139 @@ async def test_depot_iban_registered_before_account_sync(async_session: AsyncSes
     await async_session.refresh(pending)
     assert pending.category_id == cats["Depot Transfer"].id
 
+
+def test_rule_value_from_transaction_strips_iban_and_noise():
+    from src.classification.service import rule_value_from_transaction
+
+    salary = Transaction(
+        account_id=uuid.uuid4(),
+        transaction_date=date.today(),
+        amount=3200.0,
+        description="Überweisung",
+        counterparty="DE36120300009999999999ACME Industries GmbH",
+    )
+    assert rule_value_from_transaction(salary) == "ACME Industries"
+
+    generic = Transaction(
+        account_id=uuid.uuid4(),
+        transaction_date=date.today(),
+        amount=-12.0,
+        description="VISA Debitkartenumsatz",
+        counterparty="",
+    )
+    assert rule_value_from_transaction(generic) is None
+    assert rule_value_from_transaction(generic, search_hint="REWE") == "REWE"
+    assert rule_value_from_transaction(search_hint="fressnapf") == "fressnapf"
+
+
+@pytest.mark.asyncio
+async def test_manual_salary_label_learns_employer_rule(async_session: AsyncSession):
+    from src.accounts.service import create_account
+    from src.classification.models import Category
+    from src.classification.service import reclassify_user_transactions
+    from src.transactions.service import add_transaction
+    from src.users.service import get_or_create_user_by_telegram_id
+
+    user = await get_or_create_user_by_telegram_id(async_session, 464646, "Andre")
+    await seed_default_categories(async_session)
+    giro = await create_account(
+        async_session, user.id, "Giro", iban="DE36120300001085715538"
+    )
+    employer = "DE36120300001111111111Nordwind Robotics GmbH"
+    july = await add_transaction(
+        async_session,
+        user_id=user.id,
+        account_id=giro.id,
+        tx_date=date(2026, 7, 28),
+        amount=3100.0,
+        description="Überweisung",
+        counterparty=employer,
+    )
+    august = await add_transaction(
+        async_session,
+        user_id=user.id,
+        account_id=giro.id,
+        tx_date=date(2026, 8, 28),
+        amount=3100.0,
+        description="Überweisung",
+        counterparty=employer,
+    )
+    cats = {
+        c.name: c
+        for c in (await async_session.execute(select(Category))).scalars().all()
+    }
+    assert july.category_id is None
+    assert august.category_id is None
+
+    july.category_id = cats["Salary"].id
+    july.is_manually_classified = True
+    july.category = cats["Salary"]
+    await async_session.flush()
+
+    updated = await reclassify_user_transactions(async_session, user.id)
+    await async_session.refresh(august)
+    assert updated >= 1
+    assert august.category_id == cats["Salary"].id
+    assert august.is_manually_classified is False
+
+    rules = list(
+        (
+            await async_session.execute(
+                select(ClassificationRule).where(ClassificationRule.user_id == user.id)
+            )
+        ).scalars().all()
+    )
+    assert len(rules) == 1
+    assert rules[0].value == "Nordwind Robotics"
+    assert rules[0].category_id == cats["Salary"].id
+
+    again = await reclassify_user_transactions(async_session, user.id)
+    rules_after = list(
+        (
+            await async_session.execute(
+                select(ClassificationRule).where(ClassificationRule.user_id == user.id)
+            )
+        ).scalars().all()
+    )
+    assert again == 0
+    assert len(rules_after) == 1
+
+
+@pytest.mark.asyncio
+async def test_builtin_salary_matches_lohn_and_entgelt(async_session: AsyncSession):
+    from src.accounts.service import create_account
+    from src.classification.models import Category
+    from src.transactions.service import add_transaction
+    from src.users.service import get_or_create_user_by_telegram_id
+
+    user = await get_or_create_user_by_telegram_id(async_session, 474747, "Andre")
+    await seed_default_categories(async_session)
+    giro = await create_account(
+        async_session, user.id, "Giro", iban="DE36120300001085715538"
+    )
+    cats = {
+        c.name: c
+        for c in (await async_session.execute(select(Category))).scalars().all()
+    }
+    lohn = await add_transaction(
+        async_session,
+        user_id=user.id,
+        account_id=giro.id,
+        tx_date=date(2026, 8, 1),
+        amount=2800.0,
+        description="Lohnzahlung August",
+        counterparty="Employer AG",
+    )
+    entgelt = await add_transaction(
+        async_session,
+        user_id=user.id,
+        account_id=giro.id,
+        tx_date=date(2026, 8, 2),
+        amount=900.0,
+        description="Entgelt",
+        counterparty="Minijob",
+    )
+    assert lohn.category_id == cats["Salary"].id
+    assert entgelt.category_id == cats["Salary"].id
+
+

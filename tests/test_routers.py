@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import src.accounts.models  # noqa
@@ -144,6 +145,80 @@ async def test_transactions_router(client: AsyncClient, household_user):
     # Duplicate tx error -> 400
     res_dup = await client.post("/api/transactions/", json=tx_payload)
     assert res_dup.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_patch_category_learns_rule_for_sibling_bookings(
+    client: AsyncClient, async_session: AsyncSession, household_user
+):
+    from src.classification.models import Category, ClassificationRule
+    from src.classification.service import seed_default_categories
+
+    await seed_default_categories(async_session)
+    await async_session.commit()
+    user_id = str(household_user.id)
+    acc = await client.post(
+        "/api/accounts/",
+        json={"user_id": user_id, "name": "Giro", "initial_balance": 0},
+    )
+    acc_id = acc.json()["id"]
+    employer = "DE36120300001111111111Nordwind Robotics GmbH"
+    july = await client.post(
+        "/api/transactions/",
+        json={
+            "user_id": user_id,
+            "account_id": acc_id,
+            "transaction_date": "2026-07-28",
+            "amount": 3100.0,
+            "description": "Überweisung",
+            "counterparty": employer,
+        },
+    )
+    august = await client.post(
+        "/api/transactions/",
+        json={
+            "user_id": user_id,
+            "account_id": acc_id,
+            "transaction_date": "2026-08-28",
+            "amount": 3100.0,
+            "description": "Überweisung",
+            "counterparty": employer,
+        },
+    )
+    assert july.status_code == 201
+    assert august.status_code == 201
+    assert july.json()["category_name"] is None
+    assert august.json()["category_name"] is None
+
+    patched = await client.patch(
+        f"/api/transactions/{july.json()['id']}/category",
+        json={"category_name": "Salary"},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["category_name"] == "Salary"
+    assert patched.json()["is_manually_classified"] is True
+
+    listed = await client.get(f"/api/transactions/?account_id={acc_id}")
+    rows = {row["id"]: row for row in listed.json()}
+    assert rows[august.json()["id"]]["category_name"] == "Salary"
+    assert rows[august.json()["id"]]["is_manually_classified"] is False
+
+    rules = list(
+        (
+            await async_session.execute(
+                select(ClassificationRule).where(
+                    ClassificationRule.user_id == household_user.id
+                )
+            )
+        ).scalars().all()
+    )
+    assert len(rules) == 1
+    assert rules[0].value == "Nordwind Robotics"
+    salary = (
+        await async_session.execute(select(Category).where(Category.name == "Salary"))
+    ).scalars().first()
+    assert salary is not None
+    assert rules[0].category_id == salary.id
 
 
 @pytest.mark.asyncio

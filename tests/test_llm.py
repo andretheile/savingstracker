@@ -237,6 +237,31 @@ async def test_llm_create_category_and_label_transactions(async_session: AsyncSe
     )
     assert recat["category"] == "Dog Care"
 
+    third = _parse(
+        await execute_tool(
+            async_session,
+            user_id,
+            "add_transaction",
+            {
+                "account": "1121",
+                "date": date.today().isoformat(),
+                "amount": -8.5,
+                "description": "Zooplus order",
+                "counterparty": "Zooplus SE",
+            },
+        )
+    )
+    learned = _parse(
+        await execute_tool(
+            async_session,
+            user_id,
+            "label_transactions",
+            {"transaction_ids": [third["id"]], "category": "Dog Care"},
+        )
+    )
+    assert learned["labeled"] == 1
+    assert learned["rule"]["value"] == "Zooplus"
+
     by_id = _parse(
         await execute_tool(
             async_session,

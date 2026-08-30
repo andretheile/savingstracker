@@ -20,6 +20,7 @@ from src.classification.service import (
     create_user_category,
     create_user_classification_rule,
     get_category_by_name,
+    learn_classification_rule,
     list_categories_for_user,
     reclassify_user_transactions,
 )
@@ -165,7 +166,8 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     ),
     _tool(
         "set_transaction_category",
-        "Set the category of one transaction by id. Use label_transactions to recategorize several matches.",
+        "Set the category of one transaction by id. Learns a household rule from the merchant/employer. "
+        "Use label_transactions to recategorize several matches.",
         {
             "transaction_id": {"type": "string"},
             "category": {
@@ -206,7 +208,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     _tool(
         "label_transactions",
         "Label matching spendings with a category. Search description/counterparty, or pass transaction ids. "
-        "Set create_rule=true to also auto-classify future similar bookings.",
+        "Always learns a household rule so similar future bookings auto-classify.",
         {
             "category": {"type": "string"},
             "search": {
@@ -225,7 +227,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "limit": {"type": "integer"},
             "create_rule": {
                 "type": "boolean",
-                "description": "If true and search is set, add a contains rule for future syncs",
+                "description": "Kept for compatibility; labeling always learns a rule when a pattern is available",
             },
         },
         ["category"],
@@ -440,8 +442,9 @@ async def _execute(
         cat = await get_category_by_name(session, user_id, args["category"])
         tx.category_id = cat.id
         tx.is_manually_classified = True
-        await session.flush()
         tx.category = cat
+        await session.flush()
+        await reclassify_user_transactions(session, user_id)
         return _tx_dict(tx)
 
     if name == "set_transaction_exclude":
@@ -698,18 +701,16 @@ async def _label_transactions(
         tx.category = cat
     await session.flush()
 
+    rule = await learn_classification_rule(
+        session,
+        user_id,
+        cat,
+        tx=selected[0] if selected else None,
+        search_hint=search or None,
+    )
+    await reclassify_user_transactions(session, user_id)
     rule_payload = None
-    if bool(args.get("create_rule")):
-        if not search:
-            raise ValueError("create_rule requires search so the rule has a pattern")
-        rule = await create_user_classification_rule(
-            session,
-            user_id,
-            category=cat,
-            field="any",
-            operator="contains",
-            value=search,
-        )
+    if rule is not None:
         rule_payload = {
             "rule_id": str(rule.id),
             "field": rule.field,

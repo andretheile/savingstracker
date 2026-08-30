@@ -33,8 +33,10 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     auth_secret_key: str = ""
-    # Empty = any Google account may create a household. Non-empty = signup gate.
-    # Household invites can still add emails that are not on this list.
+    # Comma-separated Google emails that may sign in. Empty = any Google account
+    # may create its own household. Non-empty = listed emails share the existing
+    # household dashboard; unknown emails get 403. Household invites can still
+    # add emails that are not on this list.
     allowed_emails: str = ""
     # Comma-separated Google emails that can list/delete other households.
     admin_emails: str = ""

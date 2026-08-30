@@ -90,6 +90,11 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Settings className="w-3.5 h-3.5" strokeWidth={1.6} />
           </button>
+          {userEmail && (
+            <span className="hidden md:inline text-[11px] text-[#8A8278] max-w-[200px] truncate" title={userEmail}>
+              {userEmail}
+            </span>
+          )}
           <button
             type="button"
             onClick={onLogout}

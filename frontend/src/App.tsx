@@ -211,8 +211,7 @@ export function App() {
         <div className="cream-panel max-w-md w-full p-8 text-center">
           <h1 className="text-xl font-semibold font-heading">SavingsTracker</h1>
           <p className="text-xs text-[#6B645A] mt-2">
-            Sign in with Google to open your household dashboard. A new account starts empty;
-            an invite from Settings joins an existing household.
+            Sign in with Google to open the household dashboard.
           </p>
           <a href={loginHref()} className="gold-button-primary inline-flex mt-6 text-sm px-5 py-2.5">
             Continue with Google

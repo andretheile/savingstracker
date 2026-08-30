@@ -253,6 +253,45 @@ async def test_register_depot_iban(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_connect_stores_credentials_when_tan_required(client: AsyncClient):
+    from src.banking.adapters.base import AuthResult
+    from src.banking.adapters.fints_adapter import FinTSAdapter
+
+    auth = AuthResult(
+        success=True,
+        requires_tan=True,
+        tan_challenge="Approve in the DKB app",
+        tan_type="pushTAN / App Approval",
+        session_data={"client": object(), "decoupled": True},
+    )
+    with patch("src.banking.router.FinTSAdapter") as adapter_cls:
+        adapter = adapter_cls.return_value
+        adapter.connect = AsyncMock(return_value=auth)
+        adapter._resolve_url = FinTSAdapter()._resolve_url
+        res = await client.post(
+            "/api/banking/connect",
+            json={
+                "bank_blz": "12030000",
+                "login_name": "dkb-user",
+                "pin": "secret-pin",
+                "bank_name": "DKB",
+                "fints_url": "",
+            },
+        )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["success"] is True
+    assert body["requires_tan"] is True
+
+    listed = await client.get("/api/banking/connections")
+    assert listed.status_code == 200
+    rows = listed.json()
+    assert len(rows) == 1
+    assert rows[0]["bank_name"] == "DKB"
+    assert rows[0]["sync_status"] == "syncing"
+
+
+@pytest.mark.asyncio
 async def test_banking_sync_endpoints(client: AsyncClient):
     start = AsyncMock(
         return_value={"status": "needs_approval", "bank": "DKB", "message": "Approve in the app"}

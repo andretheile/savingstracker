@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.accounts.models import Account
@@ -384,6 +384,118 @@ DEFAULT_CATEGORIES = [
     {"name": "Savings & Investments", "direction": "transfer", "icon": "📈", "sort_order": 31},
     {"name": "Internal Transfer", "direction": "transfer", "icon": "🔄", "sort_order": 32},
 ]
+
+
+_CATEGORY_DIRECTIONS = {"income", "expense", "transfer"}
+_RULE_FIELDS = {"description", "counterparty", "amount", "any"}
+_RULE_OPERATORS = {"contains", "equals", "regex", "gt", "lt"}
+
+
+def normalize_category_name(name: str) -> str:
+    return " ".join((name or "").split())
+
+
+async def list_categories_for_user(session: AsyncSession, user_id: uuid.UUID) -> list[Category]:
+    """System defaults plus this household's custom categories."""
+    stmt = (
+        select(Category)
+        .where(or_(Category.user_id.is_(None), Category.user_id == user_id))
+        .order_by(Category.sort_order.asc(), Category.name.asc())
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def get_category_by_name(session: AsyncSession, user_id: uuid.UUID, name: str) -> Category:
+    needle = normalize_category_name(name)
+    if not needle:
+        raise ValueError("Category name is empty")
+    cats = await list_categories_for_user(session, user_id)
+    matches = [c for c in cats if c.name.lower() == needle.lower()]
+    if not matches:
+        names = ", ".join(c.name for c in cats) or "none"
+        raise ValueError(
+            f"Unknown category '{name}'. Use list_categories or create_category. Available: {names}"
+        )
+    owned = [c for c in matches if c.user_id == user_id]
+    return owned[0] if owned else matches[0]
+
+
+async def create_user_category(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    name: str,
+    direction: str = "expense",
+    icon: str = "",
+) -> Category:
+    needle = normalize_category_name(name)
+    if not needle:
+        raise ValueError("Category name is empty")
+    if len(needle) > 128:
+        raise ValueError("Category name is too long")
+    direction = (direction or "expense").strip().lower()
+    if direction not in _CATEGORY_DIRECTIONS:
+        raise ValueError("direction must be income, expense, or transfer")
+    existing = await list_categories_for_user(session, user_id)
+    for cat in existing:
+        if cat.name.lower() == needle.lower():
+            raise ValueError(f"Category '{cat.name}' already exists")
+    icon = (icon or "").strip() or (
+        "💰" if direction == "income" else "🔄" if direction == "transfer" else "🏷️"
+    )
+    if len(icon) > 8:
+        icon = icon[:8]
+    sort_order = max((c.sort_order for c in existing), default=0) + 1
+    cat = Category(
+        user_id=user_id,
+        name=needle,
+        direction=direction,
+        icon=icon,
+        sort_order=sort_order,
+    )
+    session.add(cat)
+    await session.flush()
+    return cat
+
+
+async def create_user_classification_rule(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    category: Category,
+    field: str = "any",
+    operator: str = "contains",
+    value: str = "",
+    priority: int = 50,
+) -> ClassificationRule:
+    field = (field or "any").strip().lower()
+    operator = (operator or "contains").strip().lower()
+    value = (value or "").strip()
+    if field not in _RULE_FIELDS:
+        raise ValueError("field must be description, counterparty, amount, or any")
+    if operator not in _RULE_OPERATORS:
+        raise ValueError("operator must be contains, equals, regex, gt, or lt")
+    if not value:
+        raise ValueError("Rule value is empty")
+    if operator == "regex":
+        try:
+            re.compile(value)
+        except re.error as exc:
+            raise ValueError(f"Invalid regex: {exc}") from exc
+    try:
+        priority = int(priority)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("priority must be an integer") from exc
+    rule = ClassificationRule(
+        user_id=user_id,
+        category_id=category.id,
+        field=field,
+        operator=operator,
+        value=value,
+        priority=priority,
+        is_active=True,
+    )
+    session.add(rule)
+    await session.flush()
+    return rule
 
 
 async def seed_default_categories(session: AsyncSession) -> int:

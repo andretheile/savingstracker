@@ -54,7 +54,7 @@ export const BankingHub: React.FC<BankingHubProps> = ({ onDataChanged, onSyncBan
   const fetchAccounts = useCallback(async () => {
     setIsLoadingAccounts(true);
     try {
-      const resp = await fetch(`${getApiBase()}/banking/accounts`);
+      const resp = await fetch(`${getApiBase()}/banking/accounts`, { credentials: 'include' });
       if (resp.ok) {
         const data = await resp.json();
         setBankAccounts(data);
@@ -78,6 +78,7 @@ export const BankingHub: React.FC<BankingHubProps> = ({ onDataChanged, onSyncBan
     try {
       const resp = await fetch(`${getApiBase()}/banking/connect`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           bank_blz: blz,
@@ -124,6 +125,7 @@ export const BankingHub: React.FC<BankingHubProps> = ({ onDataChanged, onSyncBan
     try {
       const resp = await fetch(`${getApiBase()}/banking/tan`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: sessionId,
@@ -177,6 +179,7 @@ export const BankingHub: React.FC<BankingHubProps> = ({ onDataChanged, onSyncBan
     try {
       const resp = await fetch(`${getApiBase()}/banking/depot`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: depotName, iban: depotIban }),
       });
@@ -282,6 +285,7 @@ export const BankingHub: React.FC<BankingHubProps> = ({ onDataChanged, onSyncBan
               onClick={async () => {
                 await fetch(`${getApiBase()}/accounts/${acc.id}/household`, {
                   method: 'PATCH',
+                  credentials: 'include',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ include_in_household: !household }),
                 });
@@ -297,6 +301,7 @@ export const BankingHub: React.FC<BankingHubProps> = ({ onDataChanged, onSyncBan
               onClick={async () => {
                 await fetch(`${getApiBase()}/accounts/${acc.id}/depot`, {
                   method: 'PATCH',
+                  credentials: 'include',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ is_depot: !depot }),
                 });
@@ -324,7 +329,9 @@ export const BankingHub: React.FC<BankingHubProps> = ({ onDataChanged, onSyncBan
               <div className="p-3 mb-4 bg-[#FAF4F2] border border-[#E8D4CE] text-xs text-[#8C4A3A] flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" strokeWidth={1.6} />
                 <div>
-                  <p className="font-medium mb-0.5">Connection failed</p>
+                  <p className="font-medium mb-0.5">
+                    {tanRequired ? 'App approval did not finish' : 'Connection failed'}
+                  </p>
                   <p>{errorMsg}</p>
                 </div>
               </div>

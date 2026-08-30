@@ -1,31 +1,50 @@
-# 📐 SavingsTracker — Architecture Specification
+# SavingsTracker — architecture
 
-This document details the software design, database ER schema, data flow pipelines, and security architecture of SavingsTracker.
+How the running app is structured: domains, data model, bank sync, and security.
 
 ---
 
-## 🏢 System Design & Layers
+## Layout
 
-SavingsTracker is structured as a **modular domain-driven application** in Python 3.12. Each domain module (`accounts`, `banking`, `transactions`, `classification`, `kpis`, `projections`, `balance_sheets`, `users`, `scheduler`) encapsulates its own models, Pydantic schemas, business services, and API routers.
+A household is one `users` row. Google accounts attach via `auth_identities`. Partners join with an invite, not a second household.
 
 ```
 src/
-├── core/                # Shared DB session, caching, security, base models
-├── users/               # User identification & Telegram mapping
-├── accounts/            # Bank account balance tracking
-├── banking/             # FinTS/HBCI adapters & sync pipelines
-├── transactions/        # Transaction storage, deduplication, filtering
-├── classification/      # Category taxonomy & pattern-matching rule engine
-├── kpis/                # Safe asteval formula evaluation & snapshot storage
-├── projections/         # Compound interest growth math & scenario analysis
-├── balance_sheets/      # Income vs Expense statement formatting
-├── scheduler/           # Celery async tasks & monthly report builder
-└── telegram_bot/        # python-telegram-bot conversational handlers
+├── core/             # Engine, sessions, Fernet, Redis helpers
+├── auth/             # Google OAuth, session, invites, admin household wipe
+├── users/            # Household row, Telegram link, per-household secrets
+├── accounts/         # Giro / depot flags, household inclusion
+├── banking/          # FinTS connect, stored PIN, Sync / confirm
+├── transactions/     # Import hash, classify, exclude
+├── classification/   # Categories and rules
+├── kpis/             # Formulas and snapshots
+├── projections/      # Compound growth
+├── balance_sheets/   # Period income vs expense
+├── llm/              # OpenRouter tool loop (web chat + Telegram)
+├── scheduler/        # Celery monthly digest and stale-connection check
+└── telegram_bot/     # Polling, pairing codes, /sync
+
+frontend/             # Vite React SPA, copied into the image as frontend/dist
 ```
+
+FastAPI serves `/api/*` behind a session cookie, then the SPA for everything else. Production compose puts the app on Traefik (`proxy` network) with no host port for 8000.
 
 ---
 
-## 🗄️ Database ER Diagram
+## Auth and tenancy
+
+1. `GET /login` redirects to Google. Callback stores `{user_id, email, name, picture}` in a signed cookie.
+2. First identity on an empty-identity, single-user database **claims** that existing household (legacy data).
+3. Later new Google emails create a **new** household unless they have a pending invite.
+4. `ALLOWED_EMAILS` gates new signups; invites bypass it.
+5. `ADMIN_EMAILS` can `GET/DELETE /api/admin/households/{id}` (not their own).
+6. Every `/api` route except `/api/health` (and the login pages) requires `get_current_user`. Path `user_id` must match the session household.
+
+---
+
+## Database
+
+Postgres in Docker uses named volume `pgdata`. Restarts keep data; `docker compose down -v` does not.
 
 ```mermaid
 erDiagram
@@ -33,10 +52,25 @@ erDiagram
         uuid id PK
         bigint telegram_id UK
         varchar name
-        varchar timezone "Europe/Berlin"
-        jsonb preferences
         boolean is_active
-        timestamp created_at
+        text telegram_bot_token_encrypted
+        text openrouter_api_key_encrypted
+        varchar telegram_allowed_chat_ids
+    }
+
+    auth_identities {
+        uuid id PK
+        uuid user_id FK
+        varchar email UK
+        varchar google_sub UK
+        varchar name
+    }
+
+    household_invites {
+        uuid id PK
+        uuid user_id FK
+        varchar email UK
+        varchar invited_by_email
     }
 
     accounts {
@@ -44,209 +78,105 @@ erDiagram
         uuid user_id FK
         varchar name
         varchar iban
-        varchar currency "EUR"
         numeric initial_balance
-        boolean is_active
-        timestamp created_at
+        boolean include_in_household
+        boolean is_depot
     }
 
     bank_connections {
         uuid id PK
         uuid user_id FK
         varchar bank_blz
-        varchar bank_name
-        varchar fints_url
-        varchar login_name "encrypted"
-        varchar adapter_type "fints"
+        varchar login_name "Fernet"
+        text pin_encrypted "Fernet"
         timestamp last_synced_at
-        varchar sync_status "idle | syncing | error"
-        text last_error
-        boolean is_active
-        timestamp created_at
-    }
-
-    categories {
-        uuid id PK
-        uuid user_id FK "null = system default"
-        uuid parent_id FK "self-reference"
-        varchar name
-        varchar icon
-        varchar direction "income | expense | transfer"
-        integer sort_order
-    }
-
-    classification_rules {
-        uuid id PK
-        uuid user_id FK
-        uuid category_id FK
-        varchar field "description | counterparty | amount"
-        varchar operator "contains | equals | regex | gt | lt"
-        varchar value
-        integer priority
-        boolean is_active
+        varchar sync_status
     }
 
     transactions {
         uuid id PK
         uuid account_id FK
         uuid category_id FK
-        uuid bank_connection_id FK
         date transaction_date
-        date value_date
-        numeric amount "positive=income, negative=expense"
+        numeric amount
         text description
-        varchar counterparty
-        varchar reference
-        varchar import_hash UK "SHA256 dedup"
+        varchar import_hash UK
+        boolean exclude_from_totals
         boolean is_manually_classified
     }
 
-    kpi_definitions {
-        uuid id PK
-        uuid user_id FK "null = built-in"
-        varchar name
-        text description
-        text formula "e.g. pct(net_cashflow, total_income)"
-        varchar unit "% | €"
-        varchar period "monthly"
-        jsonb required_variables
-        boolean is_active
-    }
-
-    kpi_snapshots {
-        uuid id PK
-        uuid kpi_id FK
-        uuid user_id FK
-        date period_start
-        date period_end
-        numeric value
-        jsonb variable_values
-        timestamp computed_at
-    }
-
-    projection_configs {
-        uuid id PK
-        uuid user_id FK
-        varchar name
-        numeric annual_return_pct "default 7.0 MSCI World"
-        numeric inflation_pct "default 2.0"
-        integer horizon_years "default 20"
-        numeric monthly_contribution
-        boolean use_actual_savings
-        boolean is_active
-    }
-
-    projection_snapshots {
-        uuid id PK
-        uuid projection_id FK
-        uuid user_id FK
-        date computed_for_month
-        numeric current_savings_rate
-        numeric monthly_contribution
-        numeric projected_value_nominal
-        numeric projected_value_real "inflation-adjusted"
-        jsonb scenarios
-        timestamp computed_at
-    }
-
-    monthly_reports {
-        uuid id PK
-        uuid user_id FK
-        date report_month
-        jsonb report_data
-        boolean sent_via_telegram
-        timestamp sent_at
-        timestamp computed_at
-    }
-
+    users ||--o{ auth_identities : "logins"
+    users ||--o{ household_invites : "pending"
     users ||--o{ accounts : "owns"
     users ||--o{ bank_connections : "configures"
-    users ||--o{ categories : "custom"
-    users ||--o{ classification_rules : "defines"
-    users ||--o{ kpi_definitions : "custom"
-    users ||--o{ projection_configs : "configures"
     accounts ||--o{ transactions : "contains"
-    bank_connections ||--o{ transactions : "imported via"
-    categories ||--o{ transactions : "classified as"
-    categories ||--o{ classification_rules : "assigns to"
-    categories ||--o{ categories : "parent/child"
-    kpi_definitions ||--o{ kpi_snapshots : "computed from"
-    projection_configs ||--o{ projection_snapshots : "computed from"
-    users ||--o{ monthly_reports : "receives"
 ```
+
+Also present (same as before): `categories`, `classification_rules`, `kpi_definitions`, `kpi_snapshots`, `projection_configs`, `projection_snapshots`, `monthly_reports`.
+
+`ensure_schema()` adds columns on existing DBs when compose skips Alembic (production image runs `python -m src.main`). Local compose can run `alembic upgrade head`.
 
 ---
 
-## 🔗 Bank Sync & Deduplication Pipeline
+## Bank sync
 
 ```mermaid
 sequenceDiagram
-    autonumber
     actor User
-    participant Bot as Telegram Bot / API
-    participant BankSvc as Banking Service
-    participant Adapter as FinTS Adapter
-    participant Bank as German Bank (HBCI)
-    participant Classifier as Rule Classifier
-    participant DB as PostgreSQL DB
+    participant UI as Web / Telegram / Chat
+    participant API as Banking service
+    participant FinTS as FinTS adapter
+    participant Bank as Bank HBCI
+    participant DB as Postgres
 
-    User->>Bot: /connect (BLZ, Login, PIN)
-    Bot->>BankSvc: initiate_sync()
-    BankSvc->>Adapter: connect()
-    Adapter->>Bank: FinTS Dialog Start
-    alt TAN Required (2FA)
-        Bank-->>Adapter: Challenge (pushTAN)
-        Adapter-->>Bot: Challenge Prompt
-        Bot-->>User: "Please approve in pushTAN app & send TAN"
-        User->>Bot: 847293 (TAN)
-        Bot->>Adapter: handle_tan(847293)
-        Adapter->>Bank: Submit TAN
+    User->>UI: Link account (BLZ, login, PIN) or later Sync
+    UI->>API: /banking/connect or /banking/sync
+    API->>FinTS: connect(login, stored or typed PIN)
+    FinTS->>Bank: dialog
+    alt DKB app approval
+        Bank-->>FinTS: NeedTAN / push
+        API-->>User: Approve in banking app
+        User->>API: /banking/sync/confirm or /syncconfirm
+        API->>FinTS: handle_tan("")
     end
-    Adapter->>Bank: fetch_accounts() & fetch_transactions()
-    Bank-->>Adapter: MT940 Transaction Data
-    loop For Each Raw Transaction
-        BankSvc->>BankSvc: Generate SHA256 import_hash
-        alt Hash Exists in DB
-            BankSvc->>BankSvc: Skip (Deduplicated)
-        else New Transaction
-            BankSvc->>Classifier: classify_transaction()
-            Classifier-->>BankSvc: Assigned Category ID
-            BankSvc->>DB: Save Transaction
-        end
+    FinTS->>Bank: accounts and transactions
+    loop each new hash
+        API->>DB: insert + classify
     end
-    BankSvc-->>Bot: Sync Complete
-    Bot-->>User: "✅ Imported X transactions"
+    API-->>User: imported counts
 ```
+
+- First **Link account** stores encrypted login + PIN on `bank_connections`.
+- Later **Sync** (`POST /api/banking/sync`) uses that PIN. Rate limit: one successful start per connection per hour.
+- Telegram `/sync` and the LLM `sync_bank` tool call the same `start_household_sync` / `confirm_household_sync` helpers.
 
 ---
 
-## ⏰ Monthly Async Task Pipeline (Celery)
+## Monthly jobs (Celery Beat)
 
-```mermaid
-graph TD
-    BEAT["Celery Beat Scheduler<br/>(1st of Month, 8:00 AM)"]
-    REDIS[("Redis Task Queue")]
-    MASTER["generate_all_monthly_reports Task"]
-    WORKER1["Worker 1: User A Report"]
-    WORKER2["Worker 2: User B Report"]
-    SYNC["Sync Bank Transactions"]
-    KPI["Compute KPI Snapshots"]
-    BAL["Generate Balance Sheet"]
-    PROJ["Calculate Growth Projections"]
-    TG["Telegram API"]
+Timezone `Europe/Berlin`.
 
-    BEAT -->|Enqueue Master Job| REDIS
-    REDIS --> MASTER
-    MASTER -->|Fan-Out Per User| REDIS
-    REDIS --> WORKER1 & WORKER2
-    WORKER1 --> SYNC --> KPI --> BAL --> PROJ --> TG
-```
+| Job | When | Task |
+|:--|:--|:--|
+| Monthly reports | 1st, 08:00 | `generate_all_monthly_reports` → per-household Telegram digest |
+| Stale connections | Daily 06:00 | Mark bank links idle > 30 days |
+
+Beat schedule entries must not include a `description` key (Celery 5.6 `ScheduleEntry` rejects it).
 
 ---
 
-## 🔒 Security Architecture
+## Security
 
-1. **At-Rest Encryption**: Sensitive bank login names and tokens are encrypted using **Fernet (AES-128 in CBC mode with HMAC)** before being written to PostgreSQL.
-2. **Ephemeral PIN Handling**: Banking PINs are passed in-memory during sync calls and are never stored in the database. When entered via Telegram, the bot deletes the PIN message immediately.
-3. **Safe Formula Parsing**: User-defined KPI formulas are evaluated using AST parsing (`asteval`), completely isolated from system builtins, standard library functions, or shell execution.
-4. **Rate Limiting**: Bank sync operations are restricted to **1 sync per hour per connection** via Redis sliding window rate-limiters to prevent account locks or API spam.
+1. **Google session** — HMAC-signed cookie (`AUTH_SECRET_KEY`), `Secure` when `PUBLIC_BASE_URL` is HTTPS, `SameSite=lax`.
+2. **At rest** — Fernet (`ENCRYPTION_KEY`) for bank login, PIN, Telegram bot token, OpenRouter key.
+3. **PIN** — stored encrypted after a successful web link so Sync/chat/`/sync` can run without typing it again. Not logged.
+4. **KPI formulas** — `asteval` only; no `eval()`.
+5. **FinTS** — registered `FINTS_PRODUCT_ID`; DKB rejects generic IDs. Sync rate-limited in Redis.
+6. **Telegram** — pairing codes from Settings; group access via `TELEGRAM_ALLOWED_CHAT_IDS`.
+7. **Admin wipe** — email allowlist; deletes identities, invites, and household rows (not your own).
+
+---
+
+## Frontend
+
+React SPA in `frontend/`. Production build is copied into the API image. Dev server (`npm run dev`) proxies API and OAuth paths to port 8000. Session requests use `credentials: "include"`.

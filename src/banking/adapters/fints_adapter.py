@@ -45,6 +45,21 @@ DECOUPLED_POLL_MAX_ATTEMPTS = 120
 # https://www.fints.org/de/hersteller/produktregistrierung
 DEFAULT_FINTS_PRODUCT_ID = "6151256F3D4F9975B877BD4A2"
 
+_STALE_DIALOG_HINT = (
+    "DKB closed this login before app approval could be confirmed. "
+    "Your credentials are saved — tap Sync bank and approve the new request in the DKB app. "
+    "Do not type a PIN or TAN."
+)
+
+
+def _friendly_tan_error(exc: Exception) -> str:
+    """python-fints maps any 9010 to a 'could not fetch BPD' message, which is usually a stale dialog."""
+    text = str(exc)
+    lowered = text.lower()
+    if "could not fetch bpd" in lowered or "9010" in text:
+        return _STALE_DIALOG_HINT
+    return text
+
 
 class FinTSAdapter(BankAdapter):
     """Bank adapter using the FinTS/HBCI protocol for German banks.
@@ -139,8 +154,13 @@ class FinTSAdapter(BankAdapter):
         """Submit TAN; poll decoupled app approvals until confirmed or timeout."""
         from fints.client import NeedTANResponse
 
-        use_decoupled = is_decoupled or not tan or tan.upper() == "OK"
+        use_decoupled = is_decoupled or not (tan or "").strip() or tan.upper() == "OK"
         tan_value = "" if use_decoupled else tan
+        # python-fints uses TAN process S only when decoupled=True. DKB App (940)
+        # often sends HITAN 0030 instead of 3955, so an empty TAN would otherwise
+        # be sent as process 2 and the bank replies with a misleading 9010/BPD error.
+        if use_decoupled and tan_response is not None:
+            tan_response.decoupled = True
 
         result = client.send_tan(tan_response, tan_value)
         if not use_decoupled:
@@ -362,7 +382,10 @@ class FinTSAdapter(BankAdapter):
 
             if client.init_tan_response:
                 tan_response = client.init_tan_response
-                is_decoupled = bool(getattr(tan_response, "decoupled", False))
+                mech = str(getattr(client, "selected_security_function", "") or "")
+                is_decoupled = bool(getattr(tan_response, "decoupled", False)) or mech == "940"
+                if is_decoupled:
+                    tan_response.decoupled = True
                 challenge_msg = getattr(
                     tan_response,
                     "challenge",
@@ -421,7 +444,7 @@ class FinTSAdapter(BankAdapter):
             )
         except Exception as e:
             logger.error("TAN verification failed: %s", e)
-            return AuthResult(success=False, error=str(e))
+            return AuthResult(success=False, error=_friendly_tan_error(e))
 
     def _fetch_accounts_sync(self, client: Any) -> list[BankAccountInfo]:
         from fints.client import NeedTANResponse

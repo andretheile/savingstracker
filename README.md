@@ -101,7 +101,7 @@ Google OAuth Web client authorized origins / redirect URIs:
 
 Optional:
 
-- `ALLOWED_EMAILS` — signup allowlist (invites still work)
+- `ALLOWED_EMAILS` — login allowlist; listed emails share the household (invites still work)
 - `ADMIN_EMAILS` — who can delete other households in Settings
 - `PUBLIC_BASE_URL` — e.g. `https://savings.tradercouncil.app` (OAuth callback + secure cookies)
 - `OPENROUTER_API_KEY` — fallback; each household can store its own key in Settings

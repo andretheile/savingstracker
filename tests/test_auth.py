@@ -15,8 +15,13 @@ import src.projections.models  # noqa
 import src.transactions.models  # noqa
 import src.users.models  # noqa
 from src.accounts.service import create_account
-from src.auth.dependencies import get_current_user
-from src.auth.service import create_household_invite, delete_household, resolve_google_user
+from src.auth.dependencies import get_current_user, require_login
+from src.auth.service import (
+    AuthDeniedError,
+    create_household_invite,
+    delete_household,
+    resolve_google_user,
+)
 from src.config import settings
 from src.core.base_model import Base
 from src.core.dependencies import get_db
@@ -48,6 +53,8 @@ async def test_api_requires_login(async_session: AsyncSession):
         assert health.status_code == 200
         me = await client.get("/api/users/me")
         assert me.status_code == 401
+        auth_me = await client.get("/api/auth/me")
+        assert auth_me.status_code == 401
     app.dependency_overrides.clear()
 
 
@@ -66,6 +73,7 @@ async def test_household_cannot_read_another_users_kpis(async_session: AsyncSess
 
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_current_user] = _override_user
+    app.dependency_overrides[require_login] = _override_user
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         denied = await client.get(
@@ -80,6 +88,30 @@ async def test_household_cannot_read_another_users_kpis(async_session: AsyncSess
         assert listed.status_code == 200
         assert listed.json() == []
     app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_allowlist_shares_household_and_rejects_unknown(
+    async_session: AsyncSession, monkeypatch
+):
+    monkeypatch.setattr(settings, "allowed_emails", "andre@example.com, partner@example.com")
+    existing = await get_or_create_default_user(async_session)
+    andre = await resolve_google_user(
+        async_session, email="andre@example.com", name="Andre", picture=None, google_sub="a"
+    )
+    partner = await resolve_google_user(
+        async_session, email="partner@example.com", name="Partner", picture=None, google_sub="b"
+    )
+    assert andre.id == existing.id
+    assert partner.id == existing.id
+    with pytest.raises(AuthDeniedError, match="not allowed"):
+        await resolve_google_user(
+            async_session,
+            email="stranger@example.com",
+            name="Stranger",
+            picture=None,
+            google_sub="c",
+        )
 
 
 @pytest.mark.asyncio

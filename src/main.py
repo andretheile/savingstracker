@@ -22,7 +22,7 @@ import src.transactions.models  # noqa
 import src.users.models  # noqa
 from src.accounts.router import router as accounts_router
 from src.accounts.service import apply_default_household_selection
-from src.auth.dependencies import get_current_user
+from src.auth.dependencies import require_login
 from src.auth.router import admin_router, household_router
 from src.auth.router import api_router as auth_api_router
 from src.auth.router import pages_router as auth_pages_router
@@ -90,7 +90,7 @@ app = FastAPI(
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.auth_secret_key or "dev-only-change-me",
-    https_only=bool(settings.public_base_url.startswith("https://")),
+    https_only=not settings.debug and settings.public_base_url.startswith("https://"),
     same_site="lax",
     max_age=14 * 24 * 3600,
 )
@@ -105,17 +105,17 @@ app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 
 app.include_router(auth_pages_router)
 app.include_router(auth_api_router, prefix="/api")
-app.include_router(household_router, prefix="/api", dependencies=[Depends(get_current_user)])
-app.include_router(admin_router, prefix="/api", dependencies=[Depends(get_current_user)])
-app.include_router(users_router, prefix="/api", dependencies=[Depends(get_current_user)])
-app.include_router(accounts_router, prefix="/api", dependencies=[Depends(get_current_user)])
-app.include_router(banking_router, prefix="/api", dependencies=[Depends(get_current_user)])
-app.include_router(transactions_router, prefix="/api", dependencies=[Depends(get_current_user)])
-app.include_router(kpis_router, prefix="/api", dependencies=[Depends(get_current_user)])
-app.include_router(projections_router, prefix="/api", dependencies=[Depends(get_current_user)])
-app.include_router(balance_sheets_router, prefix="/api", dependencies=[Depends(get_current_user)])
-app.include_router(telegram_router, prefix="/api", dependencies=[Depends(get_current_user)])
-app.include_router(llm_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(household_router, prefix="/api", dependencies=[Depends(require_login)])
+app.include_router(admin_router, prefix="/api", dependencies=[Depends(require_login)])
+app.include_router(users_router, prefix="/api", dependencies=[Depends(require_login)])
+app.include_router(accounts_router, prefix="/api", dependencies=[Depends(require_login)])
+app.include_router(banking_router, prefix="/api", dependencies=[Depends(require_login)])
+app.include_router(transactions_router, prefix="/api", dependencies=[Depends(require_login)])
+app.include_router(kpis_router, prefix="/api", dependencies=[Depends(require_login)])
+app.include_router(projections_router, prefix="/api", dependencies=[Depends(require_login)])
+app.include_router(balance_sheets_router, prefix="/api", dependencies=[Depends(require_login)])
+app.include_router(telegram_router, prefix="/api", dependencies=[Depends(require_login)])
+app.include_router(llm_router, prefix="/api", dependencies=[Depends(require_login)])
 
 
 @app.get("/api/health")

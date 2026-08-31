@@ -18,7 +18,7 @@ from src.scheduler.models import MonthlyReport
 from src.transactions.models import Transaction
 from src.users.credentials import copy_legacy_secrets_if_empty
 from src.users.models import User
-from src.users.service import get_user_by_id, list_active_users
+from src.users.service import get_or_create_default_user, get_user_by_id, list_active_users
 
 
 class AuthDeniedError(Exception):
@@ -160,6 +160,40 @@ async def delete_household(
     session.expire_all()
 
 
+async def primary_household_user(session: AsyncSession, allowed: frozenset[str]) -> User:
+    """Household that allowlisted Google emails should share."""
+    identities = list((await session.execute(select(AuthIdentity))).scalars().all())
+    for identity in identities:
+        if identity.email in allowed:
+            user = await get_user_by_id(session, identity.user_id)
+            if user is not None and user.is_active:
+                return user
+    return await get_or_create_default_user(session)
+
+
+def _attach_identity(
+    session: AsyncSession,
+    user: User,
+    *,
+    email: str,
+    name: str,
+    picture: str | None,
+    google_sub: str | None,
+) -> None:
+    copy_legacy_secrets_if_empty(user)
+    if name and user.name == "Default User":
+        user.name = name
+    session.add(
+        AuthIdentity(
+            user_id=user.id,
+            email=email,
+            google_sub=google_sub,
+            name=name or user.name,
+            picture=picture,
+        )
+    )
+
+
 async def resolve_google_user(
     session: AsyncSession,
     *,
@@ -206,19 +240,28 @@ async def resolve_google_user(
     if allowed and email not in allowed:
         raise AuthDeniedError("This Google account is not allowed to use SavingsTracker.")
 
+    if allowed:
+        user = await primary_household_user(session, allowed)
+        _attach_identity(
+            session,
+            user,
+            email=email,
+            name=name,
+            picture=picture,
+            google_sub=google_sub,
+        )
+        await session.flush()
+        return user
+
     if await count_identities(session) == 0 and await count_users(session) == 1:
         user = (await list_active_users(session))[0]
-        copy_legacy_secrets_if_empty(user)
-        if name and user.name == "Default User":
-            user.name = name
-        session.add(
-            AuthIdentity(
-                user_id=user.id,
-                email=email,
-                google_sub=google_sub,
-                name=name or user.name,
-                picture=picture,
-            )
+        _attach_identity(
+            session,
+            user,
+            email=email,
+            name=name,
+            picture=picture,
+            google_sub=google_sub,
         )
         await session.flush()
         return user

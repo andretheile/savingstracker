@@ -35,10 +35,10 @@ FastAPI serves `/api/*` behind a session cookie, then the SPA for everything els
 
 1. `GET /login` redirects to Google. Callback stores `{user_id, email, name, picture}` in a signed cookie.
 2. First identity on an empty-identity, single-user database **claims** that existing household (legacy data).
-3. Later new Google emails create a **new** household unless they have a pending invite.
-4. `ALLOWED_EMAILS` gates new signups; invites bypass it.
+3. Later new Google emails create a **new** household unless they have a pending invite, or they are listed in `ALLOWED_EMAILS` (those emails share the existing household).
+4. `ALLOWED_EMAILS` is a login allowlist: unknown Google accounts get 403. Invites bypass it. Empty = any Google account may create a household.
 5. `ADMIN_EMAILS` can `GET/DELETE /api/admin/households/{id}` (not their own).
-6. Every `/api` route except `/api/health` (and the login pages) requires `get_current_user`. Path `user_id` must match the session household.
+6. Every `/api` route except `/api/health` (and the login pages) requires `require_login` / `get_current_user`. Path `user_id` must match the session household.
 
 ---
 

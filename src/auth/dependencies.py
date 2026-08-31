@@ -45,6 +45,7 @@ async def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+require_login = get_current_user
 
 
 async def require_admin(request: Request, user: CurrentUser) -> User:

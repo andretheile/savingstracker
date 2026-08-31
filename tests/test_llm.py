@@ -20,7 +20,7 @@ import src.projections.models  # noqa
 import src.transactions.models  # noqa
 import src.users.models  # noqa
 from src.accounts.service import create_account
-from src.auth.dependencies import get_current_user
+from src.auth.dependencies import get_current_user, require_login
 from src.classification.service import seed_default_categories
 from src.core.base_model import Base
 from src.core.dependencies import get_db
@@ -59,6 +59,7 @@ async def client(async_session: AsyncSession, household_user):
 
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_current_user] = _override_user
+    app.dependency_overrides[require_login] = _override_user
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac
